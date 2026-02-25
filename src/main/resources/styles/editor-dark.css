@@ -1,0 +1,45 @@
+/* ========== Тёмная тема редактора ========== */
+
+.root {
+    -fx-font-family: "Segoe UI", " system-ui", sans-serif;
+    -fx-font-size: 13px;
+    -fx-font-color: #ffffff;
+    -fx-background-color: #000000;
+}
+
+.menu-bar {
+    -fx-background-color: #fafafa;
+    -fx-border-color: #000000 transparent transparent transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.code-area {
+    -fx-font-family: "JetBrains Mono", "Consolas", "Monaco", monospace;
+    -fx-font-size: 14px;
+    -fx-background-color: #1e1e1e;
+    -fx-text-fill: #ffffff;
+    -fx-cursor: text;
+}
+
+.code-area .paragraph-box {
+    -fx-background-color: #252526;
+    -fx-border-color: #333 transparent transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+
+.code-area .paragraph-text {
+    -fx-fill: #858585;
+    -fx-border-width: 0 1 0 0;
+    -fx-font-size: 13px;
+}
+
+.code-area .current-line {
+    -fx-background-color: #2d2d30;
+}
+
+/* Подсветка синтаксиса (тёмная тема) */
+.code-area .keyword { -fx-fill: #569cd6; -fx-font-weight: bold; }
+.code-area .string  { -fx-fill: #ce9178; }
+.code-area .number  { -fx-fill: #b5cea8; }
+.code-area .function { -fx-fill: #dcdcaa; }
+.code-area .comment { -fx-fill: #6a9955; -fx-font-style: italic; }

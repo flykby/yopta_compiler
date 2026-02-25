@@ -1,0 +1,154 @@
+/* ========== Глобальные стили приложения Yopta ========== */
+
+/* Окно и фон */
+.root {
+    -fx-font-family: "Segoe UI", " system-ui", sans-serif;
+    -fx-font-size: 13px;
+    -fx-background-color: #f5f5f5;
+}
+
+/* Меню */
+.menu-bar {
+    -fx-background-color: #fafafa;
+    -fx-border-color: #e0e0e0 transparent transparent transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.menu-bar .label {
+    -fx-text-fill: #333;
+}
+
+.menu-item {
+    -fx-background-color: transparent;
+}
+
+.menu-item:hover,
+.menu-item:focused {
+    -fx-background-color: #e3f2fd;
+}
+
+/* Вкладки */
+.tab-pane {
+    -fx-background-color: #fff;
+}
+
+.tab-pane > .tab-header-area .tab {
+    -fx-background-color: #e0e0e0;
+    -fx-background-radius: 4 4 0 0;
+    -fx-padding: 6 12 6 12;
+}
+
+.tab-pane > .tab-header-area .tab:selected {
+    -fx-background-color: #fff;
+    -fx-border-color: #e0e0e0 #e0e0e0 transparent #e0e0e0;
+    -fx-border-width: 1 1 0 1;
+}
+
+.tab-pane > .tab-header-area .tab .tab-label {
+    -fx-text-fill: #333;
+}
+
+.tab-pane > .tab-header-area .tab:selected .tab-label {
+    -fx-text-fill: #1976d2;
+}
+
+/* Кнопки в диалогах */
+.button {
+    -fx-background-color: #e0e0e0;
+    -fx-text-fill: #333;
+    -fx-background-radius: 4;
+}
+
+.button:hover {
+    -fx-background-color: #d0d0d0;
+}
+
+.button:focused {
+    -fx-border-color: #1976d2;
+    -fx-border-radius: 4;
+}
+
+/* Поля ввода */
+.text-field {
+    -fx-background-radius: 4;
+    -fx-border-radius: 4;
+}
+
+/* Разделитель SplitPane */
+.split-pane-divider {
+    -fx-background-color: #e0e0e0;
+    -fx-padding: 0 2 0 2;
+}
+
+/* Панель терминала снизу */
+.terminal-panel {
+    -fx-background-color: #263238;
+    -fx-padding: 6 8 8 8;
+    -fx-spacing: 6;
+}
+
+.terminal-panel .terminal-header {
+    -fx-text-fill: #b0bec5;
+    -fx-font-size: 12px;
+}
+
+.terminal-panel .text-area {
+    -fx-control-inner-background: #263238;
+    -fx-text-fill: #eceff1;
+    -fx-background-color: transparent;
+}
+
+.terminal-panel .text-field {
+    -fx-background-color: transparent;
+    -fx-text-fill: #eceff1;
+    -fx-prompt-text-fill: #78909c;
+    -fx-border-width: 0;
+    -fx-padding: 4 0 4 0;
+}
+
+.terminal-panel .terminal-input-line {
+    -fx-background-color: #263238;
+    -fx-padding: 2 8 6 8;
+    -fx-spacing: 0;
+}
+
+.terminal-panel .terminal-prompt {
+    -fx-text-fill: #81c784;
+    -fx-padding: 4 4 4 0;
+}
+
+/* Строка состояния */
+.status-bar {
+    -fx-background-color: #f0f0f0;
+    -fx-border-color: #e0e0e0 transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+    -fx-font-size: 12px;
+}
+
+.status-bar .label {
+    -fx-text-fill: #555;
+}
+
+.status-bar .status-state-stopped {
+    -fx-text-fill: #666;
+}
+
+.status-bar .status-state-building {
+    -fx-text-fill: #1565c0;
+}
+
+.status-bar .status-state-running {
+    -fx-text-fill: #2e7d32;
+    -fx-font-weight: bold;
+}
+
+/* Панель проекта: кнопки добавления */
+.project-toolbar {
+    -fx-padding: 6 8 6 8;
+    -fx-spacing: 4;
+}
+
+.project-toolbar .button {
+    -fx-font-size: 12px;
+    -fx-padding: 4 8 4 8;
+}

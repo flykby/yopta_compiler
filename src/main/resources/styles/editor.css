@@ -1,0 +1,34 @@
+/* ========== Стили редактора кода (RichTextFX CodeArea) ========== */
+/* Класс .code-area задаётся самим RichTextFX для CodeArea */
+
+.code-area {
+    -fx-font-family: "JetBrains Mono", "Consolas", "Monaco", monospace;
+    -fx-font-size: 14px;
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #24292e;
+    -fx-cursor: text;
+}
+
+/* Номера строк (ParagraphBox) */
+.code-area .paragraph-box {
+    -fx-background-color: #f6f8fa;
+    -fx-border-color: #e1e4e8 transparent transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+
+.code-area .paragraph-text {
+    -fx-fill: #6a737d;
+    -fx-font-size: 13px;
+}
+
+/* Подсветка текущей строки (опционально) */
+.code-area .current-line {
+    -fx-background-color: #f0f7ff;
+}
+
+/* Подсветка синтаксиса (Go, Python) */
+.code-area .keyword { -fx-fill: #0550ae; -fx-font-weight: bold; }
+.code-area .string  { -fx-fill: #0a3069; }
+.code-area .number  { -fx-fill: #0550ae; }
+.code-area .function { -fx-fill: #8250df; }
+.code-area .comment { -fx-fill: #6e7781; -fx-font-style: italic; }

@@ -1,0 +1,66 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+}
+
+group = 'ru.nstu.yopta'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+javafx {
+    version = '22'
+    modules = ['javafx.controls', 'javafx.fxml']
+}
+
+application {
+    mainClass = 'ru.nstu.yopta.Main'
+}
+
+configurations {
+    jflex
+}
+
+dependencies {
+    implementation 'org.openjfx:javafx-controls:22'
+    implementation 'org.openjfx:javafx-fxml:22'
+    implementation 'org.fxmisc.richtext:richtextfx:0.11.7'
+    jflex 'de.jflex:jflex:1.9.0'
+}
+
+def jflexOutputDir = file("${layout.buildDirectory.get()}/generated/sources/jflex")
+
+def generateJflex = tasks.register('generateJflex', JavaExec) {
+    group = 'code generation'
+    description = 'Generate lexer from .flex files'
+    classpath = configurations.jflex
+    mainClass = 'jflex.Main'
+    def flexDir = file('src/main/jflex')
+    onlyIf {
+        flexDir.exists() && flexDir.listFiles()?.any { it.name.endsWith('.flex') }
+    }
+    doFirst {
+        jflexOutputDir.mkdirs()
+        def flexFiles = flexDir.listFiles()?.findAll { it.name.endsWith('.flex') } ?: []
+        args = ['-d', jflexOutputDir.absolutePath] + flexFiles*.absolutePath
+    }
+}
+
+sourceSets {
+    main {
+        java.srcDirs jflexOutputDir
+    }
+}
+
+tasks.named('compileJava') {
+    dependsOn generateJflex
+}
