@@ -9,6 +9,7 @@ import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.TransferMode;
+import javafx.scene.image.Image;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.StackPane;
 import javafx.stage.DirectoryChooser;
@@ -19,6 +20,8 @@ import org.fxmisc.richtext.LineNumberFactory;
 
 import org.reactfx.Subscription;
 
+import javax.imageio.ImageIO;
+import java.awt.Taskbar;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -72,6 +75,7 @@ public class Main extends Application {
         centerAndProjectSplit.setDividerPositions(0);
 
         outputPanel = new OutputPanel();
+        outputPanel.getLexerResultsPanel().setOnErrorClick(this::navigateToEditorPosition);
         SplitPane mainSplit = new SplitPane();
         mainSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
         mainSplit.getItems().addAll(centerAndProjectSplit, outputPanel);
@@ -97,6 +101,27 @@ public class Main extends Application {
         updateStatusBar();
 
         stage.setTitle(Messages.getString("app.title"));
+        var iconUrl = getClass().getResource("/logo.png");
+        if (iconUrl != null) {
+            stage.getIcons().add(new Image(iconUrl.toExternalForm()));
+        }
+        try (var iconStream = getClass().getResourceAsStream("/logo.png")) {
+            if (iconStream != null && Taskbar.isTaskbarSupported()) {
+                var taskbar = Taskbar.getTaskbar();
+                if (taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
+                    var awtImage = ImageIO.read(iconStream);
+                    if (awtImage != null) {
+                        try {
+                            taskbar.setIconImage(awtImage);
+                        } catch (UnsupportedOperationException ignored) {
+                            // на некоторых платформах (например Windows в jpackage) может выброситься
+                        }
+                    }
+                }
+            }
+        } catch (IOException ignored) {
+            // иконка в панели ОС опциональна
+        }
         stage.setScene(scene);
         stage.setOnCloseRequest(e -> {
             if (confirmExit()) {
@@ -274,7 +299,11 @@ public class Main extends Application {
         configRunItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Alt+R"));
         configRunItem.setOnAction(e -> configureRun());
 
-        runMenu.getItems().addAll(runDebugItem, runItem, stopItem, new SeparatorMenuItem(), configRunItem);
+        MenuItem lexerItem = new MenuItem(Messages.getString("menu.lexer"));
+        lexerItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+L"));
+        lexerItem.setOnAction(e -> runLexer());
+
+        runMenu.getItems().addAll(runDebugItem, runItem, stopItem, new SeparatorMenuItem(), lexerItem, configRunItem);
 
         Menu viewMenu = new Menu(Messages.getString("menu.view"));
         MenuItem settingsItem = new MenuItem(Messages.getString("menu.settings"));
@@ -705,6 +734,33 @@ public class Main extends Application {
         }
     }
 
+    /** Запуск лексического анализа: текст из текущей вкладки → сканер → таблица лексем. */
+    private void runLexer() {
+        CodeArea area = getCurrentCodeArea();
+        if (area == null) return;
+        String text = area.getText();
+        List<Lexeme> lexemes = TypeScriptInterfaceScanner.scan(text);
+        outputPanel.showLexerResults(lexemes);
+    }
+
+    /** Переводит курсор в редакторе на позицию (строка, столбец). Вызывается при клике по ошибке в таблице лексем. */
+    private void navigateToEditorPosition(int line, int column) {
+        CodeArea area = getCurrentCodeArea();
+        if (area == null) return;
+        int paragraphs = area.getParagraphs().size();
+        int offset = 0;
+        int line1Based = Math.max(1, line);
+        int col1Based = Math.max(1, column);
+        for (int p = 0; p < line1Based - 1 && p < paragraphs; p++) {
+            offset += area.getText(p).length() + 1;
+        }
+        offset += col1Based - 1;
+        offset = Math.min(offset, area.getLength());
+        area.selectRange(offset, offset);
+        area.requestFocus();
+        tabPane.getSelectionModel().select(getCurrentEditorTab() != null ? getCurrentEditorTab().getTab() : null);
+    }
+
     private void readStreamToOutput(java.io.InputStream stream, boolean isStderr) {
         byte[] buf = new byte[1024];
         java.nio.charset.Charset cs = java.nio.charset.Charset.defaultCharset();
@@ -755,6 +811,8 @@ public class Main extends Application {
     }
 
     public static void main(String[] args) {
+        // Имя в доке (macOS) и в панели задач вместо "Java"
+        System.setProperty("apple.awt.application.name", "Yopta Code");
         launch(args);
     }
 }

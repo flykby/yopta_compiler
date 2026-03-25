@@ -24,6 +24,8 @@ javafx {
 
 application {
     mainClass = 'ru.nstu.yopta.Main'
+    // Имя в доке macOS (вместо "Java"); на Windows/Linux не мешает
+    applicationDefaultJvmArgs = ['-Xdock:name=Yopta Code']
 }
 
 configurations {

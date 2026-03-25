@@ -27,16 +27,7 @@ public class ProjectPanel extends VBox {
     public ProjectPanel() {
         treeView = new TreeView<>();
         treeView.setShowRoot(true);
-        treeView.setCellFactory(tv -> {
-            TreeCell<Path> cell = new TreeCell<>() {
-                @Override
-                protected void updateItem(Path path, boolean empty) {
-                    super.updateItem(path, empty);
-                    setText(empty || path == null ? null : path.getFileName().toString());
-                }
-            };
-            return cell;
-        });
+        treeView.setCellFactory(tv -> new PathTreeCell());
         treeView.setOnMouseClicked(e -> {
             if (e.getClickCount() == 2) {
                 TreeItem<Path> item = treeView.getSelectionModel().getSelectedItem();
@@ -205,5 +196,13 @@ public class ProjectPanel extends VBox {
             if (found != null) return found;
         }
         return null;
+    }
+
+    private static class PathTreeCell extends TreeCell<Path> {
+        @Override
+        protected void updateItem(Path path, boolean empty) {
+            super.updateItem(path, empty);
+            setText(empty || path == null ? null : path.getFileName().toString());
+        }
     }
 }

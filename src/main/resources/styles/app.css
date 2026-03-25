@@ -152,3 +152,12 @@
     -fx-font-size: 12px;
     -fx-padding: 4 8 4 8;
 }
+
+/* Строка с ошибкой в таблице лексем */
+.lexer-results-panel .table-row-cell.lexer-error-row {
+    -fx-background-color: #ffebee;
+}
+
+.lexer-results-panel .table-row-cell.lexer-error-row .table-cell {
+    -fx-text-fill: #c62828;
+}

@@ -9,36 +9,21 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Базовая подсветка синтаксиса для Go и Python: комментарии, строки, числа, ключевые слова, вызовы функций.
+ * Подсветка синтаксиса для TypeScript (объявления {@code interface} и {@code type}) и обычный текст.
  */
 public final class SyntaxHighlighter {
 
     public enum Language {
-        GO,
-        PYTHON,
+        TYPESCRIPT,
         PLAIN
     }
 
-    private static final String[] GO_KEYWORDS = {
-        "break", "case", "chan", "const", "continue", "default", "defer", "else",
-        "fallthrough", "for", "func", "go", "goto", "if", "import", "interface",
-        "map", "package", "range", "return", "select", "struct", "switch", "type", "var"
-    };
-    private static final String[] PYTHON_KEYWORDS = {
-        "False", "None", "True", "and", "as", "async", "await", "break", "class",
-        "continue", "def", "del", "elif", "else", "except", "finally", "for",
-        "from", "global", "if", "import", "in", "is", "lambda", "nonlocal",
-        "not", "or", "pass", "raise", "return", "try", "while", "with", "yield"
-    };
-
-    private static final Pattern GO_PATTERN = buildGoPattern();
-    private static final Pattern PYTHON_PATTERN = buildPythonPattern();
+    private static final Pattern TYPESCRIPT_INTERFACE_PATTERN = buildTypeScriptInterfacePattern();
 
     public static Language fromPath(java.nio.file.Path path) {
         if (path == null) return Language.PLAIN;
         String name = path.getFileName().toString();
-        if (name.endsWith(".go")) return Language.GO;
-        if (name.endsWith(".py")) return Language.PYTHON;
+        if (name.endsWith(".ts")) return Language.TYPESCRIPT;
         return Language.PLAIN;
     }
 
@@ -50,53 +35,37 @@ public final class SyntaxHighlighter {
             b.add(Collections.emptyList(), text.length());
             return b.create();
         }
-        if (lang == Language.GO) return computeGo(text);
-        if (lang == Language.PYTHON) return computePython(text);
+        if (lang == Language.TYPESCRIPT) return computeTypeScript(text);
         StyleSpansBuilder<Collection<String>> b = new StyleSpansBuilder<>();
         b.add(Collections.emptyList(), text.length());
         return b.create();
     }
 
-    private static Pattern buildGoPattern() {
-        String kw = "\\b(" + String.join("|", GO_KEYWORDS) + ")\\b";
-        String str = "\"([^\"\\\\]|\\\\.)*\"|`[^`]*`";
-        // Line-based: // to EOL, /* */ on same line, or /* to EOL
-        String comment = "//[^\n]*|/\\*[^\n]*\\*/|/\\*[^\n]*";
-        String num = "\\b(0x[\\da-fA-F]+|\\d+\\.?\\d*(?:[eE][+-]?\\d+)?)\\b";
-        String fn = "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(";
-        String regex = "(?<str>" + str + ")|(?<comment>" + comment + ")|(?<num>" + num + ")|(?<kw>" + kw + ")|(?<fn>" + fn + ")";
-        return Pattern.compile(regex);
+    /** interface/type (фиолетовый), имя после ключевого слова (коричневый), Child[] (коричневый), поля — чёрный, типы string/number (зелёный). */
+    private static Pattern buildTypeScriptInterfacePattern() {
+        String typeKw = "string|number|boolean|any|unknown|object|void|null|undefined";
+        return Pattern.compile(
+            "(?<kw>interface|type)\\s+(?<typename>[a-zA-Z_][a-zA-Z0-9_]*)\\b|(?<typeref>[a-zA-Z_][a-zA-Z0-9_]*)\\s*\\[\\s*\\]|\\b(?<typekw>" + typeKw + ")\\b|\\b(?<id>[a-zA-Z_][a-zA-Z0-9_]*)\\b"
+        );
     }
 
-    private static Pattern buildPythonPattern() {
-        String kw = "\\b(" + String.join("|", PYTHON_KEYWORDS) + ")\\b";
-        String str = "\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'";
-        String comment = "#[^\n]*";
-        String num = "\\b\\d+\\.?\\d*(?:[eE][+-]?\\d+)?\\b|\\b\\d+j\\b";
-        String fn = "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(";
-        String regex = "(?<str>" + str + ")|(?<comment>" + comment + ")|(?<num>" + num + ")|(?<kw>" + kw + ")|(?<fn>" + fn + ")";
-        return Pattern.compile(regex);
-    }
-
-    private static StyleSpans<Collection<String>> computeGo(String text) {
-        return computeWithPattern(text, GO_PATTERN);
-    }
-
-    private static StyleSpans<Collection<String>> computePython(String text) {
-        return computeWithPattern(text, PYTHON_PATTERN);
-    }
-
-    private static StyleSpans<Collection<String>> computeWithPattern(String text, Pattern pattern) {
+    private static StyleSpans<Collection<String>> computeTypeScript(String text) {
         StyleSpansBuilder<Collection<String>> builder = new StyleSpansBuilder<>();
         int lastEnd = 0;
-        Matcher m = pattern.matcher(text);
+        Matcher m = TYPESCRIPT_INTERFACE_PATTERN.matcher(text);
         while (m.find()) {
             String style = null;
-            if (m.group("str") != null) style = "string";
-            else if (m.group("comment") != null) style = "comment";
-            else if (m.group("num") != null) style = "number";
-            else if (m.group("kw") != null) style = "keyword";
-            else if (m.group("fn") != null) style = "function";
+            if (m.group("kw") != null) {
+                builder.add(Collections.emptyList(), m.start() - lastEnd);
+                builder.add(Collections.singleton("interface-keyword"), m.end(1) - m.start(1));
+                builder.add(Collections.emptyList(), m.start(2) - m.end(1));
+                builder.add(Collections.singleton("type-name"), m.end(2) - m.start(2));
+                lastEnd = m.end();
+                continue;
+            }
+            if (m.group("typeref") != null) style = "type-name";
+            else if (m.group("typekw") != null) style = "type-keyword";
+            else if (m.group("id") != null) style = "identifier";
             if (style != null) {
                 builder.add(Collections.emptyList(), m.start() - lastEnd);
                 builder.add(Collections.singleton(style), m.end() - m.start());

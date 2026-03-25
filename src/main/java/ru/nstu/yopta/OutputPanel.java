@@ -7,8 +7,10 @@ import javafx.scene.control.TextArea;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.util.List;
+
 /**
- * Нижняя панель с вкладками: Терминал, Вывод, Сборка.
+ * Нижняя панель с вкладками: Терминал, Вывод, Сборка, Лексемы.
  */
 public class OutputPanel extends VBox {
 
@@ -16,6 +18,8 @@ public class OutputPanel extends VBox {
     private final TerminalPanel terminalPanel;
     private final TextArea outputArea;
     private final TextArea buildArea;
+    private final LexerResultsPanel lexerResultsPanel;
+    private static final int LEXER_TAB_INDEX = 3;
 
     public OutputPanel() {
         setMinHeight(80);
@@ -55,7 +59,10 @@ public class OutputPanel extends VBox {
         outTab.setClosable(false);
         Tab buildTab = new Tab(Messages.getString("output.tab.build"), buildScroll);
         buildTab.setClosable(false);
-        tabPane.getTabs().addAll(termTab, outTab, buildTab);
+        lexerResultsPanel = new LexerResultsPanel();
+        Tab lexerTab = new Tab(Messages.getString("output.tab.lexer"), lexerResultsPanel);
+        lexerTab.setClosable(false);
+        tabPane.getTabs().addAll(termTab, outTab, buildTab, lexerTab);
         VBox.setVgrow(tabPane, Priority.ALWAYS);
 
         getChildren().add(tabPane);
@@ -81,6 +88,22 @@ public class OutputPanel extends VBox {
         tabPane.getSelectionModel().select(2);
     }
 
+    /** Переключиться на вкладку «Лексемы». */
+    public void selectLexerTab() {
+        tabPane.getSelectionModel().select(LEXER_TAB_INDEX);
+    }
+
+    /** Показать результаты лексического анализа в таблице. */
+    public void showLexerResults(List<Lexeme> lexemes) {
+        lexerResultsPanel.setLexemes(lexemes);
+        selectLexerTab();
+    }
+
+    /** Панель результатов сканера (для установки callback навигации по ошибкам). */
+    public LexerResultsPanel getLexerResultsPanel() {
+        return lexerResultsPanel;
+    }
+
     /** Вывод в вкладку «Сборка». */
     public void appendBuild(String text) {
         buildArea.appendText(text);
@@ -99,6 +122,7 @@ public class OutputPanel extends VBox {
         tabPane.getTabs().get(0).setText(Messages.getString("output.tab.terminal"));
         tabPane.getTabs().get(1).setText(Messages.getString("output.tab.output"));
         tabPane.getTabs().get(2).setText(Messages.getString("output.tab.build"));
+        tabPane.getTabs().get(LEXER_TAB_INDEX).setText(Messages.getString("output.tab.lexer"));
     }
 
     public void destroy() {

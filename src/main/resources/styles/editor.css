@@ -26,9 +26,8 @@
     -fx-background-color: #f0f7ff;
 }
 
-/* Подсветка синтаксиса (Go, Python) */
-.code-area .keyword { -fx-fill: #0550ae; -fx-font-weight: bold; }
-.code-area .string  { -fx-fill: #0a3069; }
-.code-area .number  { -fx-fill: #0550ae; }
-.code-area .function { -fx-fill: #8250df; }
-.code-area .comment { -fx-fill: #6e7781; -fx-font-style: italic; }
+/* Подсветка TypeScript interface: interface — фиолетовый, имя типа — коричневый, поля — чёрный, типы данных — зелёный */
+.code-area .interface-keyword { -fx-fill: #6f42c1; -fx-font-weight: bold; }
+.code-area .type-name        { -fx-fill: #8b6914; }
+.code-area .identifier       { -fx-fill: #24292e; }
+.code-area .type-keyword     { -fx-fill: #22863a; }
