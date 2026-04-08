@@ -19,7 +19,9 @@ public class OutputPanel extends VBox {
     private final TextArea outputArea;
     private final TextArea buildArea;
     private final LexerResultsPanel lexerResultsPanel;
+    private final ParserResultsPanel parserResultsPanel;
     private static final int LEXER_TAB_INDEX = 3;
+    private static final int PARSER_TAB_INDEX = 4;
 
     public OutputPanel() {
         setMinHeight(80);
@@ -62,7 +64,10 @@ public class OutputPanel extends VBox {
         lexerResultsPanel = new LexerResultsPanel();
         Tab lexerTab = new Tab(Messages.getString("output.tab.lexer"), lexerResultsPanel);
         lexerTab.setClosable(false);
-        tabPane.getTabs().addAll(termTab, outTab, buildTab, lexerTab);
+        parserResultsPanel = new ParserResultsPanel();
+        Tab parserTab = new Tab(Messages.getString("output.tab.parser"), parserResultsPanel);
+        parserTab.setClosable(false);
+        tabPane.getTabs().addAll(termTab, outTab, buildTab, lexerTab, parserTab);
         VBox.setVgrow(tabPane, Priority.ALWAYS);
 
         getChildren().add(tabPane);
@@ -93,15 +98,34 @@ public class OutputPanel extends VBox {
         tabPane.getSelectionModel().select(LEXER_TAB_INDEX);
     }
 
+    /** Переключиться на вкладку «Синтаксис». */
+    public void selectParserTab() {
+        tabPane.getSelectionModel().select(PARSER_TAB_INDEX);
+    }
+
     /** Показать результаты лексического анализа в таблице. */
     public void showLexerResults(List<Lexeme> lexemes) {
         lexerResultsPanel.setLexemes(lexemes);
         selectLexerTab();
     }
 
+    /** Показать результат синтаксического анализа. */
+    public void showParserResults(ParseResult result) {
+        if (result.isSuccess()) {
+            parserResultsPanel.setSuccessMessage();
+        } else {
+            parserResultsPanel.setDiagnostics(result.getErrors());
+        }
+        selectParserTab();
+    }
+
     /** Панель результатов сканера (для установки callback навигации по ошибкам). */
     public LexerResultsPanel getLexerResultsPanel() {
         return lexerResultsPanel;
+    }
+
+    public ParserResultsPanel getParserResultsPanel() {
+        return parserResultsPanel;
     }
 
     /** Вывод в вкладку «Сборка». */
@@ -123,6 +147,7 @@ public class OutputPanel extends VBox {
         tabPane.getTabs().get(1).setText(Messages.getString("output.tab.output"));
         tabPane.getTabs().get(2).setText(Messages.getString("output.tab.build"));
         tabPane.getTabs().get(LEXER_TAB_INDEX).setText(Messages.getString("output.tab.lexer"));
+        tabPane.getTabs().get(PARSER_TAB_INDEX).setText(Messages.getString("output.tab.parser"));
     }
 
     public void destroy() {

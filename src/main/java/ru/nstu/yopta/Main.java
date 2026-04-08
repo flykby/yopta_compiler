@@ -76,6 +76,7 @@ public class Main extends Application {
 
         outputPanel = new OutputPanel();
         outputPanel.getLexerResultsPanel().setOnErrorClick(this::navigateToEditorPosition);
+        outputPanel.getParserResultsPanel().setOnRowClick(this::navigateToDiagnostic);
         SplitPane mainSplit = new SplitPane();
         mainSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
         mainSplit.getItems().addAll(centerAndProjectSplit, outputPanel);
@@ -303,7 +304,11 @@ public class Main extends Application {
         lexerItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+L"));
         lexerItem.setOnAction(e -> runLexer());
 
-        runMenu.getItems().addAll(runDebugItem, runItem, stopItem, new SeparatorMenuItem(), lexerItem, configRunItem);
+        MenuItem parserItem = new MenuItem(Messages.getString("menu.parser"));
+        parserItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+P"));
+        parserItem.setOnAction(e -> runParser());
+
+        runMenu.getItems().addAll(runDebugItem, runItem, stopItem, new SeparatorMenuItem(), lexerItem, parserItem, configRunItem);
 
         Menu viewMenu = new Menu(Messages.getString("menu.view"));
         MenuItem settingsItem = new MenuItem(Messages.getString("menu.settings"));
@@ -743,20 +748,49 @@ public class Main extends Application {
         outputPanel.showLexerResults(lexemes);
     }
 
+    /** Синтаксический анализ: лексика + парсер, вкладка «Синтаксис». */
+    private void runParser() {
+        CodeArea area = getCurrentCodeArea();
+        if (area == null) return;
+        ParseResult result = TypeScriptInterfaceParser.parse(area.getText());
+        outputPanel.showParserResults(result);
+    }
+
+    private int lineColToOffset(CodeArea area, int line1Based, int col1Based) {
+        int paragraphs = area.getParagraphs().size();
+        int offset = 0;
+        int line = Math.max(1, line1Based);
+        int col = Math.max(1, col1Based);
+        for (int p = 0; p < line - 1 && p < paragraphs; p++) {
+            offset += area.getText(p).length() + 1;
+        }
+        if (line > paragraphs) {
+            return area.getLength();
+        }
+        String lineText = area.getText(line - 1);
+        int col0 = Math.min(col - 1, lineText.length());
+        offset += col0;
+        return Math.min(offset, area.getLength());
+    }
+
     /** Переводит курсор в редакторе на позицию (строка, столбец). Вызывается при клике по ошибке в таблице лексем. */
     private void navigateToEditorPosition(int line, int column) {
         CodeArea area = getCurrentCodeArea();
         if (area == null) return;
-        int paragraphs = area.getParagraphs().size();
-        int offset = 0;
-        int line1Based = Math.max(1, line);
-        int col1Based = Math.max(1, column);
-        for (int p = 0; p < line1Based - 1 && p < paragraphs; p++) {
-            offset += area.getText(p).length() + 1;
-        }
-        offset += col1Based - 1;
-        offset = Math.min(offset, area.getLength());
+        int offset = lineColToOffset(area, line, column);
         area.selectRange(offset, offset);
+        area.requestFocus();
+        tabPane.getSelectionModel().select(getCurrentEditorTab() != null ? getCurrentEditorTab().getTab() : null);
+    }
+
+    /** Выделяет диапазон столбцов на одной строке (клик по строке таблицы синтаксиса). */
+    private void navigateToDiagnostic(SyntaxDiagnostic d) {
+        CodeArea area = getCurrentCodeArea();
+        if (area == null) return;
+        int start = lineColToOffset(area, d.getLine(), d.getStartColumn());
+        int endExclusive = lineColToOffset(area, d.getLine(), d.getEndColumn() + 1);
+        endExclusive = Math.min(Math.max(endExclusive, start), area.getLength());
+        area.selectRange(start, endExclusive);
         area.requestFocus();
         tabPane.getSelectionModel().select(getCurrentEditorTab() != null ? getCurrentEditorTab().getTab() : null);
     }
@@ -802,7 +836,8 @@ public class Main extends Application {
                         "Файл: создать, открыть файл/проект, сохранить, автосохранение.\n" +
                         "Вкладки: несколько файлов одновременно; закрытие вкладки — по крестику.\n" +
                         "Правка: отмена, буфер обмена, выделить всё.\n" +
-                        "Пуск: запуск с отладкой и без (настройка — в разработке).").showAndWait();
+                        "Пуск: лексический и синтаксический анализ (горячие клавиши в меню), запуск с отладкой и без.\n" +
+                        "Вкладка «Лексемы» — токены; «Синтаксис» — ошибки разбора; щелчок по строке переводит курсор в редактор.").showAndWait();
     }
 
     private void showAbout() {
