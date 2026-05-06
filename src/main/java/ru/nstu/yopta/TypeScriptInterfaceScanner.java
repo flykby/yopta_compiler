@@ -267,6 +267,18 @@ public final class TypeScriptInterfaceScanner {
         }
     }
 
+    /** Следующая значимая лексема после индекса {@code afterIndex}. */
+    private static Lexeme peekNextNonWs(List<Lexeme> lexemes, int afterIndex) {
+        for (int j = afterIndex + 1; j < lexemes.size(); j++) {
+            Lexeme l = lexemes.get(j);
+            int c = l.getCode();
+            if (c != CODE_WHITESPACE && c != CODE_EMPTY) {
+                return l;
+            }
+        }
+        return null;
+    }
+
     /**
      * Проверяет структуру объявлений конечным автоматом:
      * {@code interface NAME { ... };} и {@code type NAME = { ... };}.
@@ -277,6 +289,10 @@ public final class TypeScriptInterfaceScanner {
         State state = State.EXPECT_START;
         final int size = lexemes.size();
         Lexeme lastLexeme = null;
+        /** После «Имя» без interface/type: следующий «=» пропускается без лишних ошибок. */
+        boolean skipEqualsAfterMissingKeyword = false;
+        /** Уже сообщили, что после «=» нет «{» перед полями (один раз на объявление). */
+        boolean reportedMissingOpenBraceBeforeBody = false;
 
         for (int i = 0; i < size; i++) {
             Lexeme cur = lexemes.get(i);
@@ -302,8 +318,20 @@ public final class TypeScriptInterfaceScanner {
                     } else if (code == CODE_KW_TYPE) {
                         state = State.EXPECT_TYPE_ALIAS_NAME;
                     } else if (code == CODE_IDENTIFIER) {
-                        result.add(errorLexeme(cur, "ошибка: ожидается ключевое слово 'interface' или 'type'"));
-                        state = State.EXPECT_NAME;
+                        Lexeme nextSig = peekNextNonWs(lexemes, i);
+                        if (nextSig != null && nextSig.getCode() == CODE_EQUALS) {
+                            result.add(errorLexeme(cur, "ошибка: отсутствует ключевое слово «interface» или «type»"));
+                            state = State.EXPECT_OPEN_BRACE;
+                            skipEqualsAfterMissingKeyword = true;
+                            reportedMissingOpenBraceBeforeBody = false;
+                        } else {
+                            // «Man» без «=» и без ключевых слов: не переводить в EXPECT_NAME (иначе следующий
+                            // идентификатор «name» ошибочно трактуется как имя интерфейса). Считаем, что имя
+                            // объявления уже есть — ждём «{» или тело, как после «interface Man».
+                            result.add(errorLexeme(cur, "ошибка: отсутствует ключевое слово «interface» или «type»"));
+                            state = State.EXPECT_OPEN_BRACE;
+                            reportedMissingOpenBraceBeforeBody = false;
+                        }
                     } else if (code == CODE_BRACE_CLOSE || code == CODE_SEMICOLON || code == CODE_COLON
                             || isBuiltinTypeCode(code) || code == CODE_BRACKET_OPEN || code == CODE_BRACKET_CLOSE
                             || code == CODE_EQUALS) {
@@ -313,7 +341,19 @@ public final class TypeScriptInterfaceScanner {
 
                 case EXPECT_TYPE_ALIAS_NAME:
                     if (code == CODE_IDENTIFIER) {
-                        state = State.EXPECT_EQUALS;
+                        Lexeme nextAfterId = peekNextNonWs(lexemes, i);
+                        if (nextAfterId != null && nextAfterId.getCode() == CODE_COLON) {
+                            // «type» + имя поля + «:» без «ИмяПсевдонима = {» — частая опечатка/пропуск
+                            result.add(errorLexeme(cur,
+                                    "ошибка: после «type» ожидается «Имя = { ... }»; отсутствуют «=» и «{» перед телом типа"));
+                            state = State.EXPECT_COLON;
+                            if (!reportedMissingOpenBraceBeforeBody) {
+                                reportedMissingOpenBraceBeforeBody = true;
+                                braceDepth++;
+                            }
+                        } else {
+                            state = State.EXPECT_EQUALS;
+                        }
                     } else if (code == CODE_BRACE_OPEN) {
                         result.add(errorLexeme(cur, "ошибка: ожидается имя псевдонима типа перед '{'"));
                         state = State.EXPECT_FIELD_OR_CLOSE;
@@ -328,11 +368,28 @@ public final class TypeScriptInterfaceScanner {
                 case EXPECT_EQUALS:
                     if (code == CODE_EQUALS) {
                         state = State.EXPECT_OPEN_BRACE;
+                    } else if (code == CODE_COLON) {
+                        result.add(errorLexeme(cur, "ошибка: ожидается '=' перед '{'"));
+                        state = State.EXPECT_TYPE;
                     } else if (code == CODE_BRACE_OPEN) {
                         result.add(errorLexeme(cur, "ошибка: ожидается '=' перед '{'"));
                         state = State.EXPECT_FIELD_OR_CLOSE;
-                    } else if (code == CODE_IDENTIFIER || isBuiltinTypeCode(code)) {
-                        result.add(errorLexeme(cur, "ошибка: ожидается '{'"));
+                    } else if (code == CODE_IDENTIFIER) {
+                        Lexeme afterId = peekNextNonWs(lexemes, i);
+                        if (afterId != null && afterId.getCode() == CODE_COLON) {
+                            // «type A» и далее «name:» без «= {» — имя псевдонима уже принято, ждали «=»
+                            result.add(errorLexeme(cur,
+                                    "ошибка: ожидается «= {» после имени псевдонима типа перед полями"));
+                            state = State.EXPECT_COLON;
+                            if (!reportedMissingOpenBraceBeforeBody) {
+                                reportedMissingOpenBraceBeforeBody = true;
+                                braceDepth++;
+                            }
+                        } else {
+                            result.add(errorLexeme(cur, "ошибка: ожидается '=' после имени псевдонима типа"));
+                        }
+                    } else if (isBuiltinTypeCode(code)) {
+                        result.add(errorLexeme(cur, "ошибка: ожидается '=' перед '{'"));
                     } else if (code == CODE_BRACE_CLOSE) {
                         result.add(errorLexeme(cur, "ошибка: ожидается '='"));
                         state = State.EXPECT_FINAL_SEMI;
@@ -354,14 +411,29 @@ public final class TypeScriptInterfaceScanner {
                     break;
 
                 case EXPECT_OPEN_BRACE:
+                    if (skipEqualsAfterMissingKeyword && code == CODE_EQUALS) {
+                        skipEqualsAfterMissingKeyword = false;
+                        break;
+                    }
                     if (code == CODE_BRACE_OPEN) {
                         state = State.EXPECT_FIELD_OR_CLOSE;
-                    } else if (code == CODE_BRACE_CLOSE) {
+                        break;
+                    }
+                    if (code == CODE_BRACE_CLOSE) {
                         result.add(errorLexeme(cur, "ошибка: ожидается '{'"));
                         state = State.EXPECT_FINAL_SEMI;
-                    } else if (code == CODE_IDENTIFIER || isBuiltinTypeCode(code)) {
-                        result.add(errorLexeme(cur, "ошибка: ожидается '{'"));
-                    } else if (code == CODE_EQUALS) {
+                        break;
+                    }
+                    if (code == CODE_IDENTIFIER || isBuiltinTypeCode(code)) {
+                        if (!reportedMissingOpenBraceBeforeBody) {
+                            result.add(errorLexeme(cur, "ошибка: отсутствует '{' перед телом объявления"));
+                            reportedMissingOpenBraceBeforeBody = true;
+                            braceDepth++;
+                        }
+                        state = State.EXPECT_COLON;
+                        break;
+                    }
+                    if (code == CODE_EQUALS) {
                         result.add(errorLexeme(cur, "ошибка: ожидается '{'"));
                     }
                     break;
@@ -456,6 +528,8 @@ public final class TypeScriptInterfaceScanner {
                 case EXPECT_FINAL_SEMI:
                     if (code == CODE_SEMICOLON) {
                         state = State.EXPECT_START;
+                        reportedMissingOpenBraceBeforeBody = false;
+                        skipEqualsAfterMissingKeyword = false;
                     } else if (code == CODE_KW_INTERFACE || code == CODE_KW_TYPE) {
                         result.add(errorLexeme(cur, "ошибка: ожидается ';' после объявления"));
                         if (code == CODE_KW_INTERFACE) state = State.EXPECT_NAME;
