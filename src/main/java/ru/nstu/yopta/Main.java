@@ -32,6 +32,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import java.util.regex.Pattern;
+
 public class Main extends Application {
 
     public int autosave_timeout_ms = 3_000;
@@ -77,6 +79,8 @@ public class Main extends Application {
         outputPanel = new OutputPanel();
         outputPanel.getLexerResultsPanel().setOnErrorClick(this::navigateToEditorPosition);
         outputPanel.getParserResultsPanel().setOnRowClick(this::navigateToDiagnostic);
+        outputPanel.getRegexSearchPanel().setOnRunRequested(this::runRegexSearch);
+        outputPanel.getRegexSearchPanel().setOnRowClick(this::navigateToRegexMatch);
         SplitPane mainSplit = new SplitPane();
         mainSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
         mainSplit.getItems().addAll(centerAndProjectSplit, outputPanel);
@@ -308,7 +312,12 @@ public class Main extends Application {
         parserItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+P"));
         parserItem.setOnAction(e -> runParser());
 
-        runMenu.getItems().addAll(runDebugItem, runItem, stopItem, new SeparatorMenuItem(), lexerItem, parserItem, configRunItem);
+        MenuItem regexSearchItem = new MenuItem(Messages.getString("menu.regexSearch"));
+        regexSearchItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+X"));
+        regexSearchItem.setOnAction(e -> runRegexSearch());
+
+        runMenu.getItems().addAll(runDebugItem, runItem, stopItem, new SeparatorMenuItem(),
+                lexerItem, parserItem, regexSearchItem, configRunItem);
 
         Menu viewMenu = new Menu(Messages.getString("menu.view"));
         MenuItem settingsItem = new MenuItem(Messages.getString("menu.settings"));
@@ -756,6 +765,37 @@ public class Main extends Application {
         outputPanel.showParserResults(result);
     }
 
+    /** Поиск подстрок по выбранному регулярному выражению (ЛР4). */
+    private void runRegexSearch() {
+        CodeArea area = getCurrentCodeArea();
+        if (area == null) return;
+        String text = area.getText();
+        if (text.isEmpty()) {
+            new Alert(Alert.AlertType.INFORMATION, Messages.getString("regex.noData")).showAndWait();
+            outputPanel.selectRegexTab();
+            return;
+        }
+        RegexSearchKind kind = outputPanel.getRegexSearchPanel().getSelectedKind();
+        if (kind == null) {
+            new Alert(Alert.AlertType.WARNING, Messages.getString("regex.noKind")).showAndWait();
+            return;
+        }
+        Pattern pattern = kind.getPattern();
+        List<RegexMatch> matches = RegexSearch.findAll(text, pattern);
+        outputPanel.showRegexResults(matches);
+    }
+
+    /** Выделяет в редакторе фрагмент, соответствующий строке таблицы поиска по РВ. */
+    private void navigateToRegexMatch(RegexMatch m) {
+        CodeArea area = getCurrentCodeArea();
+        if (area == null || m == null) return;
+        int start = m.startOffset();
+        int end = Math.min(start + m.length(), area.getLength());
+        end = Math.max(end, start);
+        area.selectRange(start, end);
+        area.requestFocus();
+    }
+
     private int lineColToOffset(CodeArea area, int line1Based, int col1Based) {
         int paragraphs = area.getParagraphs().size();
         int offset = 0;
@@ -836,7 +876,7 @@ public class Main extends Application {
                         "Файл: создать, открыть файл/проект, сохранить, автосохранение.\n" +
                         "Вкладки: несколько файлов одновременно; закрытие вкладки — по крестику.\n" +
                         "Правка: отмена, буфер обмена, выделить всё.\n" +
-                        "Пуск: лексический и синтаксический анализ (горячие клавиши в меню), запуск с отладкой и без.\n" +
+                        "Пуск: лексический и синтаксический анализ, поиск по регулярным выражениям (горячие клавиши в меню), запуск с отладкой и без.\n" +
                         "Вкладка «Лексемы» — токены; «Синтаксис» — ошибки разбора; щелчок по строке переводит курсор в редактор.").showAndWait();
     }
 

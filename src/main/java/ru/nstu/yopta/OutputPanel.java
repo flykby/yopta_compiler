@@ -10,7 +10,7 @@ import javafx.scene.layout.VBox;
 import java.util.List;
 
 /**
- * Нижняя панель с вкладками: Терминал, Вывод, Сборка, Лексемы.
+ * Нижняя панель с вкладками: Терминал, Вывод, Сборка, Лексемы, Синтаксис, Регулярные выражения.
  */
 public class OutputPanel extends VBox {
 
@@ -20,8 +20,10 @@ public class OutputPanel extends VBox {
     private final TextArea buildArea;
     private final LexerResultsPanel lexerResultsPanel;
     private final ParserResultsPanel parserResultsPanel;
+    private final RegexSearchPanel regexSearchPanel;
     private static final int LEXER_TAB_INDEX = 3;
     private static final int PARSER_TAB_INDEX = 4;
+    private static final int REGEX_TAB_INDEX = 5;
 
     public OutputPanel() {
         setMinHeight(80);
@@ -67,7 +69,10 @@ public class OutputPanel extends VBox {
         parserResultsPanel = new ParserResultsPanel();
         Tab parserTab = new Tab(Messages.getString("output.tab.parser"), parserResultsPanel);
         parserTab.setClosable(false);
-        tabPane.getTabs().addAll(termTab, outTab, buildTab, lexerTab, parserTab);
+        regexSearchPanel = new RegexSearchPanel();
+        Tab regexTab = new Tab(Messages.getString("output.tab.regex"), regexSearchPanel);
+        regexTab.setClosable(false);
+        tabPane.getTabs().addAll(termTab, outTab, buildTab, lexerTab, parserTab, regexTab);
         VBox.setVgrow(tabPane, Priority.ALWAYS);
 
         getChildren().add(tabPane);
@@ -103,10 +108,21 @@ public class OutputPanel extends VBox {
         tabPane.getSelectionModel().select(PARSER_TAB_INDEX);
     }
 
+    /** Переключиться на вкладку поиска по регулярным выражениям. */
+    public void selectRegexTab() {
+        tabPane.getSelectionModel().select(REGEX_TAB_INDEX);
+    }
+
     /** Показать результаты лексического анализа в таблице. */
     public void showLexerResults(List<Lexeme> lexemes) {
         lexerResultsPanel.setLexemes(lexemes);
         selectLexerTab();
+    }
+
+    /** Показать результаты поиска по регулярному выражению. */
+    public void showRegexResults(List<RegexMatch> matches) {
+        regexSearchPanel.setMatches(matches);
+        selectRegexTab();
     }
 
     /** Показать результат синтаксического анализа. */
@@ -126,6 +142,10 @@ public class OutputPanel extends VBox {
 
     public ParserResultsPanel getParserResultsPanel() {
         return parserResultsPanel;
+    }
+
+    public RegexSearchPanel getRegexSearchPanel() {
+        return regexSearchPanel;
     }
 
     /** Вывод в вкладку «Сборка». */
@@ -148,6 +168,8 @@ public class OutputPanel extends VBox {
         tabPane.getTabs().get(2).setText(Messages.getString("output.tab.build"));
         tabPane.getTabs().get(LEXER_TAB_INDEX).setText(Messages.getString("output.tab.lexer"));
         tabPane.getTabs().get(PARSER_TAB_INDEX).setText(Messages.getString("output.tab.parser"));
+        tabPane.getTabs().get(REGEX_TAB_INDEX).setText(Messages.getString("output.tab.regex"));
+        regexSearchPanel.refreshLocale();
     }
 
     public void destroy() {
