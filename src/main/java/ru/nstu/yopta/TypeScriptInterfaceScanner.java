@@ -55,6 +55,11 @@ public final class TypeScriptInterfaceScanner {
         return !t.isEmpty() && Character.isUpperCase(t.charAt(0));
     }
 
+    /** Встроенное имя типа (как в лексике: {@code string}, {@code number}, …). */
+    public static boolean isBuiltinTypeName(String name) {
+        return name != null && TYPE_KEYWORDS.contains(name);
+    }
+
     /**
      * Только лексический разбор: символы → лексемы. Структурная проверка — в {@link TypeScriptInterfaceParser}.
      */

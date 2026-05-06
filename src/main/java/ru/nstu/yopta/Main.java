@@ -31,10 +31,16 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 import java.util.regex.Pattern;
 
+import ru.nstu.yopta.ast.AstProgram;
+
 public class Main extends Application {
+
+    /** Лексический/синтаксический/семантический разбор в памяти — ограничение на размер текста редактора. */
+    private static final int MAX_ANALYSIS_SOURCE_CHARS = 2_000_000;
 
     public int autosave_timeout_ms = 3_000;
 
@@ -81,6 +87,7 @@ public class Main extends Application {
         outputPanel.getParserResultsPanel().setOnRowClick(this::navigateToDiagnostic);
         outputPanel.getRegexSearchPanel().setOnRunRequested(this::runRegexSearch);
         outputPanel.getRegexSearchPanel().setOnRowClick(this::navigateToRegexMatch);
+        outputPanel.getSemanticResultsPanel().setOnRowClick(this::navigateToSemanticDiagnostic);
         SplitPane mainSplit = new SplitPane();
         mainSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
         mainSplit.getItems().addAll(centerAndProjectSplit, outputPanel);
@@ -316,8 +323,12 @@ public class Main extends Application {
         regexSearchItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+X"));
         regexSearchItem.setOnAction(e -> runRegexSearch());
 
+        MenuItem semanticItem = new MenuItem(Messages.getString("menu.semantic"));
+        semanticItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+M"));
+        semanticItem.setOnAction(e -> runSemanticAnalysis());
+
         runMenu.getItems().addAll(runDebugItem, runItem, stopItem, new SeparatorMenuItem(),
-                lexerItem, parserItem, regexSearchItem, configRunItem);
+                lexerItem, parserItem, regexSearchItem, semanticItem, configRunItem);
 
         Menu viewMenu = new Menu(Messages.getString("menu.view"));
         MenuItem settingsItem = new MenuItem(Messages.getString("menu.settings"));
@@ -753,16 +764,77 @@ public class Main extends Application {
         CodeArea area = getCurrentCodeArea();
         if (area == null) return;
         String text = area.getText();
-        List<Lexeme> lexemes = TypeScriptInterfaceScanner.scan(text);
-        outputPanel.showLexerResults(lexemes);
+        if (!checkAnalysisInputSize(text)) {
+            return;
+        }
+        statusBar.setMessage(Messages.getString("status.analyzing"));
+        CompletableFuture.supplyAsync(() -> TypeScriptInterfaceScanner.scan(text))
+                .thenAccept(lexemes -> Platform.runLater(() -> {
+                    statusBar.setMessage(Messages.getString("status.ready"));
+                    outputPanel.showLexerResults(lexemes);
+                }));
     }
 
     /** Синтаксический анализ: лексика + парсер, вкладка «Синтаксис». */
     private void runParser() {
         CodeArea area = getCurrentCodeArea();
         if (area == null) return;
-        ParseResult result = TypeScriptInterfaceParser.parse(area.getText());
-        outputPanel.showParserResults(result);
+        String text = area.getText();
+        if (!checkAnalysisInputSize(text)) {
+            return;
+        }
+        statusBar.setMessage(Messages.getString("status.analyzing"));
+        CompletableFuture.supplyAsync(() -> TypeScriptInterfaceParser.parse(text))
+                .thenAccept(result -> Platform.runLater(() -> {
+                    statusBar.setMessage(Messages.getString("status.ready"));
+                    outputPanel.showParserResults(result);
+                }));
+    }
+
+    /** Семантический анализ (ЛР5): AST и проверки после успешного синтаксиса (разбор в фоне — не блокирует интерфейс). */
+    private void runSemanticAnalysis() {
+        CodeArea area = getCurrentCodeArea();
+        if (area == null) return;
+        String text = area.getText();
+        if (!checkAnalysisInputSize(text)) {
+            return;
+        }
+        statusBar.setMessage(Messages.getString("status.analyzing"));
+        CompletableFuture.supplyAsync(() -> SemanticAnalysisBundle.compute(text))
+                .thenAccept(bundle -> Platform.runLater(() -> finishSemanticAnalysis(bundle)));
+    }
+
+    private void finishSemanticAnalysis(SemanticAnalysisBundle bundle) {
+        statusBar.setMessage(Messages.getString("status.ready"));
+        ParseResult parseResult = bundle.parseResult();
+        if (!parseResult.isSuccess()) {
+            outputPanel.showSemanticSkippedDueToSyntax();
+            new Alert(Alert.AlertType.WARNING, Messages.getString("semantic.needCleanSyntax")).showAndWait();
+            outputPanel.showParserResults(parseResult);
+            return;
+        }
+        outputPanel.showSemanticResults(bundle.astTree(), bundle.semErrors());
+    }
+
+    private boolean checkAnalysisInputSize(String text) {
+        if (text.length() <= MAX_ANALYSIS_SOURCE_CHARS) {
+            return true;
+        }
+        new Alert(Alert.AlertType.WARNING,
+                Messages.getString("analysis.inputTooLarge", MAX_ANALYSIS_SOURCE_CHARS)).showAndWait();
+        return false;
+    }
+
+    /** Результат фонового семантического конвейера (парсинг + семантика + печать AST). */
+    private record SemanticAnalysisBundle(ParseResult parseResult, List<SemanticDiagnostic> semErrors, String astTree) {
+        static SemanticAnalysisBundle compute(String source) {
+            ParseResult pr = TypeScriptInterfaceParser.parse(source);
+            if (!pr.isSuccess()) {
+                return new SemanticAnalysisBundle(pr, List.of(), "");
+            }
+            AstProgram ast = pr.getAst() != null ? pr.getAst() : AstProgram.empty();
+            return new SemanticAnalysisBundle(pr, SemanticAnalyzer.analyze(ast), AstPrinter.print(ast));
+        }
     }
 
     /** Поиск подстрок по выбранному регулярному выражению (ЛР4). */
@@ -823,6 +895,18 @@ public class Main extends Application {
         tabPane.getSelectionModel().select(getCurrentEditorTab() != null ? getCurrentEditorTab().getTab() : null);
     }
 
+    /** Клик по строке таблицы семантических ошибок. */
+    private void navigateToSemanticDiagnostic(SemanticDiagnostic d) {
+        CodeArea area = getCurrentCodeArea();
+        if (area == null || d == null) return;
+        int start = lineColToOffset(area, d.getLine(), d.getStartColumn());
+        int endExclusive = lineColToOffset(area, d.getLine(), d.getEndColumn() + 1);
+        endExclusive = Math.min(Math.max(endExclusive, start), area.getLength());
+        area.selectRange(start, endExclusive);
+        area.requestFocus();
+        tabPane.getSelectionModel().select(getCurrentEditorTab() != null ? getCurrentEditorTab().getTab() : null);
+    }
+
     /** Выделяет диапазон столбцов на одной строке (клик по строке таблицы синтаксиса). */
     private void navigateToDiagnostic(SyntaxDiagnostic d) {
         CodeArea area = getCurrentCodeArea();
@@ -876,8 +960,8 @@ public class Main extends Application {
                         "Файл: создать, открыть файл/проект, сохранить, автосохранение.\n" +
                         "Вкладки: несколько файлов одновременно; закрытие вкладки — по крестику.\n" +
                         "Правка: отмена, буфер обмена, выделить всё.\n" +
-                        "Пуск: лексический и синтаксический анализ, поиск по регулярным выражениям (горячие клавиши в меню), запуск с отладкой и без.\n" +
-                        "Вкладка «Лексемы» — токены; «Синтаксис» — ошибки разбора; щелчок по строке переводит курсор в редактор.").showAndWait();
+                        "Пуск: лексический и синтаксический анализ, семантический анализ (AST и контекстные ошибки), поиск по регулярным выражениям (горячие клавиши в меню), запуск с отладкой и без.\n" +
+                        "Вкладка «Лексемы» — токены; «Синтаксис» — ошибки разбора; «Семантика» — дерево AST и семантические ошибки; щелчок по строке таблицы выделяет фрагмент в редакторе.").showAndWait();
     }
 
     private void showAbout() {

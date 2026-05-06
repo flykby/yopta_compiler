@@ -1,5 +1,14 @@
 package ru.nstu.yopta;
 
+import ru.nstu.yopta.ast.ArrayTypeReference;
+import ru.nstu.yopta.ast.AstDeclaration;
+import ru.nstu.yopta.ast.AstProgram;
+import ru.nstu.yopta.ast.FieldDeclaration;
+import ru.nstu.yopta.ast.InterfaceDeclaration;
+import ru.nstu.yopta.ast.NamedTypeReference;
+import ru.nstu.yopta.ast.TypeAliasDeclaration;
+import ru.nstu.yopta.ast.TypeReference;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -19,12 +28,19 @@ import static ru.nstu.yopta.TypeScriptInterfaceScanner.CODE_WHITESPACE;
 /**
  * Синтаксический анализатор (рекурсивный спуск) для подмножества TypeScript:
  * {@code interface Id { ... };} и {@code type Id = { ... };}.
- * Нейтрализация ошибок — паник-режим с синхронизацией по множествам допустимых токенов (метод Айронса).
+ * Построение AST при разборе. Нейтрализация ошибок — метод Айронса.
  */
 public final class TypeScriptInterfaceParser {
 
     private static final String KW_INTERFACE = "interface";
     private static final String KW_TYPE = "type";
+
+    /** Защита от бесконечного добавления ошибок при неверной синхронизации в теле «{ ... }». */
+    private static final int MAX_SYNTAX_DIAGNOSTICS = 500;
+
+    /** Страховка от зацикливания при ошибках в разборе. */
+    private static final int MAX_PROGRAM_ITERATIONS = 500_000;
+    private static final int MAX_FIELD_LIST_ITERATIONS = 500_000;
 
     private final List<Lexeme> tokens;
     private final List<SyntaxDiagnostic> errors = new ArrayList<>();
@@ -35,7 +51,7 @@ public final class TypeScriptInterfaceParser {
     }
 
     /**
-     * Разбор исходной строки: лексика {@link TypeScriptInterfaceScanner#tokenize}, затем синтаксис.
+     * Разбор исходной строки: лексика {@link TypeScriptInterfaceScanner#tokenize}, затем синтаксис и AST.
      */
     public static ParseResult parse(String source) {
         List<Lexeme> lexemes = TypeScriptInterfaceScanner.tokenize(source);
@@ -43,20 +59,29 @@ public final class TypeScriptInterfaceParser {
     }
 
     private ParseResult parseProgram() {
+        List<AstDeclaration> decls = new ArrayList<>();
+        int programSteps = 0;
         while (true) {
+            if (++programSteps > MAX_PROGRAM_ITERATIONS) {
+                report(peek(), "превышен внутренний лимит итераций разбора программы");
+                break;
+            }
             skipErrorsAtStatementLevel();
             Lexeme p = peek();
             if (p == null) {
                 break;
             }
             if (isDeclarationStart(p)) {
-                parseDeclaration();
+                AstDeclaration d = parseDeclaration();
+                if (d != null) {
+                    decls.add(d);
+                }
             } else {
                 report(p, "ожидалось объявление: ключевое слово «interface» или «type»");
                 syncToDeclarationStart();
             }
         }
-        return new ParseResult(errors);
+        return new ParseResult(errors, new AstProgram(decls));
     }
 
     private void skipErrorsAtStatementLevel() {
@@ -78,74 +103,87 @@ public final class TypeScriptInterfaceParser {
         return KW_INTERFACE.equals(k) || KW_TYPE.equals(k);
     }
 
-    private void parseDeclaration() {
+    private AstDeclaration parseDeclaration() {
         Lexeme p = peek();
         if (p == null) {
-            return;
+            return null;
         }
         if (p.getCode() == CODE_KEYWORD && KW_INTERFACE.equals(p.getText())) {
-            parseInterfaceDecl();
-        } else if (p.getCode() == CODE_KEYWORD && KW_TYPE.equals(p.getText())) {
-            parseTypeAliasDecl();
-        } else {
-            report(p, "ожидалось «interface» или «type»");
-            syncToDeclarationStart();
+            return parseInterfaceDecl();
         }
+        if (p.getCode() == CODE_KEYWORD && KW_TYPE.equals(p.getText())) {
+            return parseTypeAliasDecl();
+        }
+        report(p, "ожидалось «interface» или «type»");
+        syncToDeclarationStart();
+        return null;
     }
 
-    private void parseInterfaceDecl() {
+    private InterfaceDeclaration parseInterfaceDecl() {
         take(); // interface
-        if (!expectIdentifier("после «interface» ожидалось имя интерфейса")) {
+        Lexeme name = takeIdentifier("после «interface» ожидалось имя интерфейса");
+        if (name == null) {
             syncToDeclarationStart();
-            return;
+            return null;
         }
         if (!expectToken(CODE_BRACE_OPEN, "ожидалось «{» перед телом интерфейса")) {
             syncToDeclarationStart();
-            return;
+            return null;
         }
-        parseFieldList();
+        List<FieldDeclaration> fields = parseFieldList();
         if (!expectToken(CODE_BRACE_CLOSE, "ожидалось «}» после полей интерфейса")) {
             syncToDeclarationStart();
-            return;
+            return null;
         }
         if (!expectToken(CODE_SEMICOLON, "ожидалось «;» после объявления интерфейса")) {
             syncToDeclarationStart();
+            return null;
         }
+        return new InterfaceDeclaration(name, fields);
     }
 
-    private void parseTypeAliasDecl() {
+    private TypeAliasDeclaration parseTypeAliasDecl() {
         take(); // type
-        if (!expectIdentifier("после «type» ожидалось имя псевдонима типа")) {
+        Lexeme name = takeIdentifier("после «type» ожидалось имя псевдонима типа");
+        if (name == null) {
             syncToDeclarationStart();
-            return;
+            return null;
         }
         if (!expectToken(CODE_EQUALS, "ожидалось «=» перед объектным типом")) {
             syncToDeclarationStart();
-            return;
+            return null;
         }
         if (!expectToken(CODE_BRACE_OPEN, "ожидалось «{» — в объявлении type поддерживается только объектный тип")) {
             syncToDeclarationStart();
-            return;
+            return null;
         }
-        parseFieldList();
+        List<FieldDeclaration> fields = parseFieldList();
         if (!expectToken(CODE_BRACE_CLOSE, "ожидалось «}» после полей типа")) {
             syncToDeclarationStart();
-            return;
+            return null;
         }
         if (!expectToken(CODE_SEMICOLON, "ожидалось «;» после объявления type")) {
             syncToDeclarationStart();
+            return null;
         }
+        return new TypeAliasDeclaration(name, fields);
     }
 
     /**
      * FieldList → ε | Field FieldList; Field → Id ':' Type ';'
      */
-    private void parseFieldList() {
+    private List<FieldDeclaration> parseFieldList() {
+        List<FieldDeclaration> fields = new ArrayList<>();
+        int fieldSteps = 0;
         while (true) {
+            if (++fieldSteps > MAX_FIELD_LIST_ITERATIONS) {
+                report(peek(), "превышен внутренний лимит полей в «{ ... }»");
+                return fields;
+            }
             Lexeme p = peek();
             if (p == null) {
                 report(null, "неожиданный конец файла внутри «{ ... }» (ожидалось поле или «}»)");
-                return;
+                return fields;
             }
             if (p.getCode() == CODE_ERROR) {
                 Lexeme e = take();
@@ -154,10 +192,13 @@ public final class TypeScriptInterfaceParser {
                 continue;
             }
             if (p.getCode() == CODE_BRACE_CLOSE) {
-                return;
+                return fields;
             }
             if (p.getCode() == CODE_IDENTIFIER) {
-                parseField();
+                FieldDeclaration f = parseField();
+                if (f != null) {
+                    fields.add(f);
+                }
                 continue;
             }
             report(p, "ожидалось имя поля или «}»");
@@ -165,81 +206,84 @@ public final class TypeScriptInterfaceParser {
         }
     }
 
-    private void parseField() {
-        take(); // identifier
+    private FieldDeclaration parseField() {
+        Lexeme name = takeIdentifier("ожидалось имя поля");
+        if (name == null) {
+            syncInBody();
+            return null;
+        }
         if (!expectToken(CODE_COLON, "ожидалось «:» после имени поля")) {
             syncInBody();
-            return;
+            return null;
         }
-        parseType();
+        TypeReference type = parseType();
+        if (type == null) {
+            return null;
+        }
         if (!expectToken(CODE_SEMICOLON, "ожидалось «;» после типа поля")) {
             syncInBody();
+            return null;
+        }
+        return new FieldDeclaration(name, type);
+    }
+
+    private TypeReference parseType() {
+        TypeReference base = parseTypeBase();
+        if (base == null) {
+            return null;
+        }
+        while (true) {
+            Lexeme p = peek();
+            if (p == null) {
+                return base;
+            }
+            if (p.getCode() != CODE_BRACKET_OPEN) {
+                return base;
+            }
+            take();
+            if (!expectToken(CODE_BRACKET_CLOSE, "ожидалось «]» после «[»")) {
+                syncInBody();
+                return base;
+            }
+            base = new ArrayTypeReference(base);
         }
     }
 
-    private void parseType() {
+    private TypeReference parseTypeBase() {
         Lexeme t = peek();
         if (t == null) {
             report(null, "ожидался тип после «:»");
-            return;
+            return null;
         }
         if (t.getCode() == CODE_ERROR) {
             report(take(), "недопустимый символ в исходном тексте");
             syncInBody();
-            return;
+            return null;
         }
         if (t.getCode() == CODE_TYPE) {
-            take();
-        } else if (t.getCode() == CODE_IDENTIFIER) {
-            if (TypeScriptInterfaceScanner.isAcceptableTypeLexeme(t)) {
-                take();
-            } else {
-                Lexeme bad = take();
-                report(bad, "неизвестный тип «" + bad.getText() + "» (ожидался встроенный тип или имя с заглавной буквы)");
-                syncAfterBadTypeFragment();
-            }
-        } else {
-            report(take(), "ожидался тип (встроенный идентификатор типа или пользовательское имя с заглавной буквы)");
-            syncAfterBadTypeFragment();
-        }
-        parseArraySuffix();
-    }
-
-    private void parseArraySuffix() {
-        Lexeme p = peek();
-        if (p == null) {
-            return;
-        }
-        if (p.getCode() != CODE_BRACKET_OPEN) {
-            return;
-        }
-        take();
-        Lexeme close = peek();
-        if (close != null && close.getCode() == CODE_BRACKET_CLOSE) {
-            take();
-        } else {
-            if (close != null) {
-                report(close, "ожидалось «]» после «[»");
-            } else {
-                report(null, "ожидалось «]» после «[»");
-            }
-            syncInBody();
-        }
-    }
-
-    /** Ожидание идентификатора (имя), не ключевое слово в роли имени. */
-    private boolean expectIdentifier(String message) {
-        Lexeme t = peek();
-        if (t == null) {
-            report(null, message);
-            return false;
+            return new NamedTypeReference(take());
         }
         if (t.getCode() == CODE_IDENTIFIER) {
-            take();
-            return true;
+            if (TypeScriptInterfaceScanner.isAcceptableTypeLexeme(t)) {
+                return new NamedTypeReference(take());
+            }
+            Lexeme bad = take();
+            report(bad, "неизвестный тип «" + bad.getText() + "» (ожидался встроенный тип или имя с заглавной буквы)");
+            syncAfterBadTypeFragment();
+            return null;
+        }
+        report(take(), "ожидался тип (встроенный идентификатор типа или пользовательское имя с заглавной буквы)");
+        syncAfterBadTypeFragment();
+        return null;
+    }
+
+    private Lexeme takeIdentifier(String message) {
+        Lexeme t = peek();
+        if (t != null && t.getCode() == CODE_IDENTIFIER) {
+            return take();
         }
         report(t, message);
-        return false;
+        return null;
     }
 
     private boolean expectToken(int code, String message) {
@@ -257,6 +301,9 @@ public final class TypeScriptInterfaceParser {
     }
 
     private void report(Lexeme at, String description) {
+        if (errors.size() >= MAX_SYNTAX_DIAGNOSTICS) {
+            return;
+        }
         if (at == null) {
             Lexeme anchor = lastConsumedOrEnd();
             errors.add(new SyntaxDiagnostic("ε", anchor.getLine(), anchor.getStartColumn(), anchor.getEndColumn(), description));
@@ -306,9 +353,6 @@ public final class TypeScriptInterfaceParser {
         return i;
     }
 
-    /**
-     * Синхронизация на уровне программы: до следующего объявления или конца.
-     */
     private void syncToDeclarationStart() {
         while (true) {
             Lexeme p = peek();
@@ -326,7 +370,8 @@ public final class TypeScriptInterfaceParser {
     }
 
     /**
-     * Синхронизация внутри тела {@code { ... }}: до «;», «}» или начала следующего объявления.
+     * Внутри «{ ... }» синхронизация только по «;» или «}». Не останавливаться на «interface»/«type» без
+     * потребления токена — иначе бесконечный цикл в {@link #parseFieldList()}.
      */
     private void syncInBody() {
         while (true) {
@@ -338,17 +383,10 @@ public final class TypeScriptInterfaceParser {
             if (c == CODE_SEMICOLON || c == CODE_BRACE_CLOSE) {
                 return;
             }
-            if (c == CODE_KEYWORD) {
-                String k = p.getText();
-                if (KW_INTERFACE.equals(k) || KW_TYPE.equals(k)) {
-                    return;
-                }
-            }
             take();
         }
     }
 
-    /** После ошибки в имени типа — до «;», «[», «}» или начала объявления. */
     private void syncAfterBadTypeFragment() {
         while (true) {
             Lexeme p = peek();
@@ -358,12 +396,6 @@ public final class TypeScriptInterfaceParser {
             int c = p.getCode();
             if (c == CODE_SEMICOLON || c == CODE_BRACKET_OPEN || c == CODE_BRACE_CLOSE) {
                 return;
-            }
-            if (c == CODE_KEYWORD) {
-                String k = p.getText();
-                if (KW_INTERFACE.equals(k) || KW_TYPE.equals(k)) {
-                    return;
-                }
             }
             take();
         }

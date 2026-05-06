@@ -10,7 +10,7 @@ import javafx.scene.layout.VBox;
 import java.util.List;
 
 /**
- * Нижняя панель с вкладками: Терминал, Вывод, Сборка, Лексемы, Синтаксис, Регулярные выражения.
+ * Нижняя панель с вкладками: Терминал, Вывод, Сборка, Лексемы, Синтаксис, Регулярные выражения, Семантика.
  */
 public class OutputPanel extends VBox {
 
@@ -21,9 +21,11 @@ public class OutputPanel extends VBox {
     private final LexerResultsPanel lexerResultsPanel;
     private final ParserResultsPanel parserResultsPanel;
     private final RegexSearchPanel regexSearchPanel;
+    private final SemanticResultsPanel semanticResultsPanel;
     private static final int LEXER_TAB_INDEX = 3;
     private static final int PARSER_TAB_INDEX = 4;
     private static final int REGEX_TAB_INDEX = 5;
+    private static final int SEMANTIC_TAB_INDEX = 6;
 
     public OutputPanel() {
         setMinHeight(80);
@@ -72,7 +74,10 @@ public class OutputPanel extends VBox {
         regexSearchPanel = new RegexSearchPanel();
         Tab regexTab = new Tab(Messages.getString("output.tab.regex"), regexSearchPanel);
         regexTab.setClosable(false);
-        tabPane.getTabs().addAll(termTab, outTab, buildTab, lexerTab, parserTab, regexTab);
+        semanticResultsPanel = new SemanticResultsPanel();
+        Tab semanticTab = new Tab(Messages.getString("output.tab.semantic"), semanticResultsPanel);
+        semanticTab.setClosable(false);
+        tabPane.getTabs().addAll(termTab, outTab, buildTab, lexerTab, parserTab, regexTab, semanticTab);
         VBox.setVgrow(tabPane, Priority.ALWAYS);
 
         getChildren().add(tabPane);
@@ -113,6 +118,11 @@ public class OutputPanel extends VBox {
         tabPane.getSelectionModel().select(REGEX_TAB_INDEX);
     }
 
+    /** Переключиться на вкладку «Семантика». */
+    public void selectSemanticTab() {
+        tabPane.getSelectionModel().select(SEMANTIC_TAB_INDEX);
+    }
+
     /** Показать результаты лексического анализа в таблице. */
     public void showLexerResults(List<Lexeme> lexemes) {
         lexerResultsPanel.setLexemes(lexemes);
@@ -123,6 +133,22 @@ public class OutputPanel extends VBox {
     public void showRegexResults(List<RegexMatch> matches) {
         regexSearchPanel.setMatches(matches);
         selectRegexTab();
+    }
+
+    /** AST и семантические ошибки (ЛР5). */
+    public void showSemanticResults(String astText, List<SemanticDiagnostic> diagnostics) {
+        semanticResultsPanel.setAstText(astText);
+        semanticResultsPanel.setDiagnostics(diagnostics);
+        selectSemanticTab();
+    }
+
+    /**
+     * При синтаксических ошибках семантика не запускается; показываем пояснение вместо пустого AST,
+     * чтобы вкладка «Семантика» не казалась «сломанной».
+     */
+    public void showSemanticSkippedDueToSyntax() {
+        semanticResultsPanel.setAstText(Messages.getString("semantic.ast.syntaxFailed"));
+        semanticResultsPanel.setDiagnostics(List.of());
     }
 
     /** Показать результат синтаксического анализа. */
@@ -148,6 +174,10 @@ public class OutputPanel extends VBox {
         return regexSearchPanel;
     }
 
+    public SemanticResultsPanel getSemanticResultsPanel() {
+        return semanticResultsPanel;
+    }
+
     /** Вывод в вкладку «Сборка». */
     public void appendBuild(String text) {
         buildArea.appendText(text);
@@ -159,6 +189,7 @@ public class OutputPanel extends VBox {
         outputArea.setStyle(fontStyle);
         buildArea.setStyle(fontStyle);
         terminalPanel.setOutputFontSize(size);
+        semanticResultsPanel.setFontSize(size);
     }
 
     /** Обновить заголовки вкладок при смене языка. */
@@ -169,7 +200,9 @@ public class OutputPanel extends VBox {
         tabPane.getTabs().get(LEXER_TAB_INDEX).setText(Messages.getString("output.tab.lexer"));
         tabPane.getTabs().get(PARSER_TAB_INDEX).setText(Messages.getString("output.tab.parser"));
         tabPane.getTabs().get(REGEX_TAB_INDEX).setText(Messages.getString("output.tab.regex"));
+        tabPane.getTabs().get(SEMANTIC_TAB_INDEX).setText(Messages.getString("output.tab.semantic"));
         regexSearchPanel.refreshLocale();
+        semanticResultsPanel.refreshLocale();
     }
 
     public void destroy() {
