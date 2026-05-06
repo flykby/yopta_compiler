@@ -88,6 +88,8 @@ public class Main extends Application {
         outputPanel.getRegexSearchPanel().setOnRunRequested(this::runRegexSearch);
         outputPanel.getRegexSearchPanel().setOnRowClick(this::navigateToRegexMatch);
         outputPanel.getSemanticResultsPanel().setOnRowClick(this::navigateToSemanticDiagnostic);
+        outputPanel.getIrResultsPanel().setOnLexerErrorClick(this::navigateToEditorPosition);
+        outputPanel.getIrResultsPanel().setOnSyntaxClick(this::navigateToDiagnostic);
         SplitPane mainSplit = new SplitPane();
         mainSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
         mainSplit.getItems().addAll(centerAndProjectSplit, outputPanel);
@@ -323,12 +325,16 @@ public class Main extends Application {
         regexSearchItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+X"));
         regexSearchItem.setOnAction(e -> runRegexSearch());
 
+        MenuItem internalFormItem = new MenuItem(Messages.getString("menu.internalForm"));
+        internalFormItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+I"));
+        internalFormItem.setOnAction(e -> runInternalRepresentationAnalysis());
+
         MenuItem semanticItem = new MenuItem(Messages.getString("menu.semantic"));
         semanticItem.setAccelerator(KeyCombination.keyCombination("Shortcut+Shift+M"));
         semanticItem.setOnAction(e -> runSemanticAnalysis());
 
         runMenu.getItems().addAll(runDebugItem, runItem, stopItem, new SeparatorMenuItem(),
-                lexerItem, parserItem, regexSearchItem, semanticItem, configRunItem);
+                lexerItem, parserItem, regexSearchItem, internalFormItem, semanticItem, configRunItem);
 
         Menu viewMenu = new Menu(Messages.getString("menu.view"));
         MenuItem settingsItem = new MenuItem(Messages.getString("menu.settings"));
@@ -789,6 +795,56 @@ public class Main extends Application {
                     statusBar.setMessage(Messages.getString("status.ready"));
                     outputPanel.showParserResults(result);
                 }));
+    }
+
+    /** Внутренняя форма программы — арифметическое выражение: тетрады и ПОЛИЗ (ЛР6). Текст вкладки целиком — одно выражение. */
+    private void runInternalRepresentationAnalysis() {
+        CodeArea area = getCurrentCodeArea();
+        if (area == null) return;
+        String text = area.getText();
+        if (!checkAnalysisInputSize(text)) {
+            return;
+        }
+        statusBar.setMessage(Messages.getString("status.analyzing"));
+        CompletableFuture.supplyAsync(() -> new IrAnalysisWork(text, ArithmeticAnalysis.analyze(text)))
+                .thenAccept(w -> Platform.runLater(() -> finishInternalRepresentationAnalysis(w)));
+    }
+
+    private record IrAnalysisWork(String editorText, ArithmeticAnalysisResult result) {
+    }
+
+    private void finishInternalRepresentationAnalysis(IrAnalysisWork work) {
+        ArithmeticAnalysisResult r = work.result();
+        statusBar.setMessage(Messages.getString("status.ready"));
+        outputPanel.showIrResults(r);
+        String src = work.editorText();
+        if (r.lexerErrors()) {
+            new Alert(Alert.AlertType.WARNING, irWarningMessage("arith.warn.lexer", src)).showAndWait();
+        } else if (r.syntaxErrors() != null && !r.syntaxErrors().isEmpty()) {
+            new Alert(Alert.AlertType.WARNING, irWarningMessage("arith.warn.syntax", src)).showAndWait();
+        }
+    }
+
+    /** Дополняет предупреждение ЛР6, если в редакторе явно не арифметика (interface/type, «:», «;», фигурные скобки). */
+    private static String irWarningMessage(String baseKey, String editorSource) {
+        String m = Messages.getString(baseKey);
+        if (sourceLooksUnlikeArithmeticIr(editorSource)) {
+            m = m + "\n\n" + Messages.getString("arith.warn.hintNonArithmetic");
+        }
+        return m;
+    }
+
+    private static boolean sourceLooksUnlikeArithmeticIr(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '{' || c == '}' || c == ';' || c == ':') {
+                return true;
+            }
+        }
+        return text.matches("(?s).*\\binterface\\b.*");
     }
 
     /** Семантический анализ (ЛР5): AST и проверки после успешного синтаксиса (разбор в фоне — не блокирует интерфейс). */

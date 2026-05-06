@@ -10,7 +10,7 @@ import javafx.scene.layout.VBox;
 import java.util.List;
 
 /**
- * Нижняя панель с вкладками: Терминал, Вывод, Сборка, Лексемы, Синтаксис, Регулярные выражения, Семантика.
+ * Нижняя панель с вкладками: Терминал, Вывод, Сборка, Лексемы, Синтаксис, Регулярные выражения, Семантика, ВПП (ЛР6).
  */
 public class OutputPanel extends VBox {
 
@@ -22,10 +22,12 @@ public class OutputPanel extends VBox {
     private final ParserResultsPanel parserResultsPanel;
     private final RegexSearchPanel regexSearchPanel;
     private final SemanticResultsPanel semanticResultsPanel;
+    private final IrResultsPanel irResultsPanel;
     private static final int LEXER_TAB_INDEX = 3;
     private static final int PARSER_TAB_INDEX = 4;
     private static final int REGEX_TAB_INDEX = 5;
     private static final int SEMANTIC_TAB_INDEX = 6;
+    private static final int IR_TAB_INDEX = 7;
 
     public OutputPanel() {
         setMinHeight(80);
@@ -77,7 +79,10 @@ public class OutputPanel extends VBox {
         semanticResultsPanel = new SemanticResultsPanel();
         Tab semanticTab = new Tab(Messages.getString("output.tab.semantic"), semanticResultsPanel);
         semanticTab.setClosable(false);
-        tabPane.getTabs().addAll(termTab, outTab, buildTab, lexerTab, parserTab, regexTab, semanticTab);
+        irResultsPanel = new IrResultsPanel();
+        Tab irTab = new Tab(Messages.getString("output.tab.ir"), irResultsPanel);
+        irTab.setClosable(false);
+        tabPane.getTabs().addAll(termTab, outTab, buildTab, lexerTab, parserTab, regexTab, semanticTab, irTab);
         VBox.setVgrow(tabPane, Priority.ALWAYS);
 
         getChildren().add(tabPane);
@@ -123,6 +128,11 @@ public class OutputPanel extends VBox {
         tabPane.getSelectionModel().select(SEMANTIC_TAB_INDEX);
     }
 
+    /** Вкладка внутренней формы (тетрады, ПОЛИЗ), ЛР6. */
+    public void selectIrTab() {
+        tabPane.getSelectionModel().select(IR_TAB_INDEX);
+    }
+
     /** Показать результаты лексического анализа в таблице. */
     public void showLexerResults(List<Lexeme> lexemes) {
         lexerResultsPanel.setLexemes(lexemes);
@@ -149,6 +159,12 @@ public class OutputPanel extends VBox {
     public void showSemanticSkippedDueToSyntax() {
         semanticResultsPanel.setAstText(Messages.getString("semantic.ast.syntaxFailed"));
         semanticResultsPanel.setDiagnostics(List.of());
+    }
+
+    /** Результат анализа арифметического выражения (ЛР6). */
+    public void showIrResults(ArithmeticAnalysisResult result) {
+        irResultsPanel.setResult(result);
+        selectIrTab();
     }
 
     /** Показать результат синтаксического анализа. */
@@ -178,6 +194,10 @@ public class OutputPanel extends VBox {
         return semanticResultsPanel;
     }
 
+    public IrResultsPanel getIrResultsPanel() {
+        return irResultsPanel;
+    }
+
     /** Вывод в вкладку «Сборка». */
     public void appendBuild(String text) {
         buildArea.appendText(text);
@@ -190,6 +210,7 @@ public class OutputPanel extends VBox {
         buildArea.setStyle(fontStyle);
         terminalPanel.setOutputFontSize(size);
         semanticResultsPanel.setFontSize(size);
+        irResultsPanel.setFontSize(size);
     }
 
     /** Обновить заголовки вкладок при смене языка. */
@@ -201,8 +222,10 @@ public class OutputPanel extends VBox {
         tabPane.getTabs().get(PARSER_TAB_INDEX).setText(Messages.getString("output.tab.parser"));
         tabPane.getTabs().get(REGEX_TAB_INDEX).setText(Messages.getString("output.tab.regex"));
         tabPane.getTabs().get(SEMANTIC_TAB_INDEX).setText(Messages.getString("output.tab.semantic"));
+        tabPane.getTabs().get(IR_TAB_INDEX).setText(Messages.getString("output.tab.ir"));
         regexSearchPanel.refreshLocale();
         semanticResultsPanel.refreshLocale();
+        irResultsPanel.refreshLocale();
     }
 
     public void destroy() {
