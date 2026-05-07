@@ -780,8 +780,7 @@ public class Main extends Application {
             new Alert(Alert.AlertType.WARNING, Messages.getString("regex.noKind")).showAndWait();
             return;
         }
-        Pattern pattern = kind.getPattern();
-        List<RegexMatch> matches = RegexSearch.findAll(text, pattern);
+        List<RegexMatch> matches = kind.findAll(text);
         outputPanel.showRegexResults(matches);
     }
 

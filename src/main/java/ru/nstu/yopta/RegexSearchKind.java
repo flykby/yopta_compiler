@@ -12,7 +12,7 @@ public enum RegexSearchKind {
             Pattern.compile("-?[0-9]+")
     ),
 
-    /** Формат «Last, First Middle», одна строка целиком; границы строк — по {@link Pattern#MULTILINE}. */
+    /** Формат «Last, First Middle», одна строка целиком; поиск реализован автоматом (доп. задание). */
     FULL_NAME(
             "regex.kind.fullName",
             Pattern.compile("^[A-Z][a-z]*,\\s+[A-Z][a-z]*\\s+[A-Z][a-z]*$", Pattern.MULTILINE)
@@ -44,5 +44,13 @@ public enum RegexSearchKind {
 
     public Pattern getPattern() {
         return pattern;
+    }
+
+    /** Единая точка поиска: для ФИО — автомат, иначе — Pattern. */
+    public java.util.List<RegexMatch> findAll(String text) {
+        if (this == FULL_NAME) {
+            return FullNameAutomatonSearch.findAll(text);
+        }
+        return RegexSearch.findAll(text, pattern);
     }
 }

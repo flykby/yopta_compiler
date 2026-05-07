@@ -34,14 +34,23 @@ class RegexSearchTest {
 
     @Test
     void fullName_line_based() {
-        Pattern p = RegexSearchKind.FULL_NAME.getPattern();
         String ok = "Smith, John Michael\n";
-        List<RegexMatch> m = RegexSearch.findAll(ok, p);
+        List<RegexMatch> m = RegexSearchKind.FULL_NAME.findAll(ok);
         assertEquals(1, m.size());
         assertEquals("Smith, John Michael", m.get(0).fragment());
 
-        assertTrue(RegexSearch.findAll("Smith, john Michael\n", p).isEmpty());
-        assertTrue(RegexSearch.findAll("Smith John Michael\n", p).isEmpty());
+        assertTrue(RegexSearchKind.FULL_NAME.findAll("Smith, john Michael\n").isEmpty());
+        assertTrue(RegexSearchKind.FULL_NAME.findAll("Smith John Michael\n").isEmpty());
+    }
+
+    @Test
+    void fullName_automaton_reports_line_and_column() {
+        String text = "x\nSmith, John Michael\nz\n";
+        List<RegexMatch> m = RegexSearchKind.FULL_NAME.findAll(text);
+        assertEquals(1, m.size());
+        assertEquals(2, m.get(0).line());
+        assertEquals(1, m.get(0).column());
+        assertEquals("Smith, John Michael", m.get(0).fragment());
     }
 
     @Test
