@@ -99,7 +99,7 @@ interface Node {
 
 **Рисунок 1.** Лексический автомат для варианта «объявления `interface` / `type` с объектным типом» (соответствует реализации `TypeScriptInterfaceScanner`).
 
-![Image alt](https://github.com/flykby/yopta_compiler/raw/lab2/image.png)
+![Диаграмма состояний сканера](image.png)
 
 ---
 
