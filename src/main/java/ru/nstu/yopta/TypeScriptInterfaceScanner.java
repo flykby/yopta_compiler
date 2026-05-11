@@ -293,15 +293,50 @@ public final class TypeScriptInterfaceScanner {
         boolean skipEqualsAfterMissingKeyword = false;
         /** Уже сообщили, что после «=» нет «{» перед полями (один раз на объявление). */
         boolean reportedMissingOpenBraceBeforeBody = false;
+        /** Подавляет «осколки» ошибочного слова в текущей строке (до пробела или конца строки). */
+        int suppressMalformedWordLine = -1;
+        boolean suppressMalformedWordUntilWhitespace = false;
+        /** Подавляет хвост испорченного имени типа (например, num$$ber) до ';' в той же строке. */
+        int suppressMalformedTypeTailLine = -1;
 
         for (int i = 0; i < size; i++) {
             Lexeme cur = lexemes.get(i);
             int code = cur.getCode();
 
+            if (suppressMalformedWordLine == cur.getLine()) {
+                if (suppressMalformedWordUntilWhitespace) {
+                    if (code == CODE_ERROR || code == CODE_IDENTIFIER) {
+                        continue;
+                    }
+                    if (code == CODE_WHITESPACE) {
+                        suppressMalformedWordLine = -1;
+                        suppressMalformedWordUntilWhitespace = false;
+                    }
+                } else {
+                    if (code == CODE_ERROR || code == CODE_IDENTIFIER) {
+                        continue;
+                    }
+                    if (isLineBreakWhitespace(cur)) {
+                        suppressMalformedWordLine = -1;
+                    }
+                }
+            }
+            if (suppressMalformedTypeTailLine == cur.getLine()) {
+                if (code == CODE_ERROR || code == CODE_IDENTIFIER || isBuiltinTypeCode(code)
+                        || (code == CODE_WHITESPACE && !isLineBreakWhitespace(cur))) {
+                    continue;
+                }
+                if (code == CODE_SEMICOLON || isLineBreakWhitespace(cur) || code == CODE_BRACE_CLOSE || code == CODE_BRACKET_OPEN) {
+                    suppressMalformedTypeTailLine = -1;
+                }
+            }
+
             if (code == CODE_BRACE_OPEN) braceDepth++;
             if (code == CODE_BRACE_CLOSE) braceDepth--;
 
-            if (code == CODE_BRACE_CLOSE && braceDepth < 0) {
+            if (code == CODE_BRACE_CLOSE && braceDepth < 0
+                    && state != State.EXPECT_OPEN_BRACE
+                    && state != State.EXPECT_NAME) {
                 result.add(errorLexeme(cur, "ошибка: лишняя '}'"));
                 braceDepth = 0;
             }
@@ -319,19 +354,16 @@ public final class TypeScriptInterfaceScanner {
                         state = State.EXPECT_TYPE_ALIAS_NAME;
                     } else if (code == CODE_IDENTIFIER) {
                         Lexeme nextSig = peekNextNonWs(lexemes, i);
-                        if (nextSig != null && nextSig.getCode() == CODE_EQUALS) {
-                            result.add(errorLexeme(cur, "ошибка: отсутствует ключевое слово «interface» или «type»"));
-                            state = State.EXPECT_OPEN_BRACE;
-                            skipEqualsAfterMissingKeyword = true;
-                            reportedMissingOpenBraceBeforeBody = false;
-                        } else {
-                            // «Man» без «=» и без ключевых слов: не переводить в EXPECT_NAME (иначе следующий
-                            // идентификатор «name» ошибочно трактуется как имя интерфейса). Считаем, что имя
-                            // объявления уже есть — ждём «{» или тело, как после «interface Man».
-                            result.add(errorLexeme(cur, "ошибка: отсутствует ключевое слово «interface» или «type»"));
-                            state = State.EXPECT_OPEN_BRACE;
-                            reportedMissingOpenBraceBeforeBody = false;
+                        if (nextSig != null && nextSig.getCode() == CODE_ERROR && nextSig.getLine() == cur.getLine()) {
+                            result.add(errorLexeme(cur, "ошибка: неверный формат, ожидалось имя идентификатора"));
+                            state = State.EXPECT_NAME;
+                            suppressMalformedWordLine = cur.getLine();
+                            suppressMalformedWordUntilWhitespace = true;
+                            break;
                         }
+                        result.add(errorLexeme(cur, "ошибка: отсутствует ключевое слово «interface» или «type»"));
+                        state = State.EXPECT_NAME;
+                        reportedMissingOpenBraceBeforeBody = false;
                     } else if (code == CODE_BRACE_CLOSE || code == CODE_SEMICOLON || code == CODE_COLON
                             || isBuiltinTypeCode(code) || code == CODE_BRACKET_OPEN || code == CODE_BRACKET_CLOSE
                             || code == CODE_EQUALS) {
@@ -398,6 +430,14 @@ public final class TypeScriptInterfaceScanner {
 
                 case EXPECT_NAME:
                     if (code == CODE_IDENTIFIER) {
+                        Lexeme nextSig = peekNextNonWs(lexemes, i);
+                        if (nextSig != null && nextSig.getCode() == CODE_ERROR && nextSig.getLine() == cur.getLine()) {
+                            result.add(errorLexeme(cur, "ошибка: неверный формат, ожидалось имя идентификатора"));
+                            state = State.EXPECT_OPEN_BRACE;
+                            suppressMalformedWordLine = cur.getLine();
+                            suppressMalformedWordUntilWhitespace = false;
+                            break;
+                        }
                         state = State.EXPECT_OPEN_BRACE;
                     } else if (isDeclarationKeywordCode(code) || isBuiltinTypeCode(code)) {
                         result.add(errorLexeme(cur, "ошибка: ожидается имя интерфейса"));
@@ -405,6 +445,7 @@ public final class TypeScriptInterfaceScanner {
                         result.add(errorLexeme(cur, "ошибка: ожидается имя интерфейса перед '{'"));
                         state = State.EXPECT_FIELD_OR_CLOSE;
                     } else if (code == CODE_BRACE_CLOSE) {
+                        result.add(errorLexeme(cur, "ошибка: ожидается имя идентификатора"));
                         result.add(errorLexeme(cur, "ошибка: ожидается '{'"));
                         state = State.EXPECT_FINAL_SEMI;
                     }
@@ -443,9 +484,12 @@ public final class TypeScriptInterfaceScanner {
                         state = State.EXPECT_COLON;
                     } else if (code == CODE_BRACE_CLOSE) {
                         state = State.EXPECT_FINAL_SEMI;
+                    } else if (code == CODE_SEMICOLON) {
+                        // Лишний ';' между полями/сразу после '{' — тихо пропускаем,
+                        // чтобы не плодить шум "ожидается имя поля или '}'".
                     } else if (isDeclarationKeywordCode(code)) {
                         result.add(errorLexeme(cur, "ошибка: ожидается имя поля или '}'"));
-                    } else if (code == CODE_COLON || code == CODE_SEMICOLON || code == CODE_BRACKET_OPEN || code == CODE_BRACKET_CLOSE) {
+                    } else if (code == CODE_COLON || code == CODE_BRACKET_OPEN || code == CODE_BRACKET_CLOSE) {
                         result.add(errorLexeme(cur, "ошибка: ожидается имя поля или '}'"));
                     }
                     break;
@@ -455,6 +499,15 @@ public final class TypeScriptInterfaceScanner {
                         state = State.EXPECT_TYPE;
                     } else if (code == CODE_IDENTIFIER || isBuiltinTypeCode(code)) {
                         result.add(errorLexeme(cur, "ошибка: ожидается ':'"));
+                        // Восстановление после пропущенного ':' — считаем, что двоеточие было,
+                        // а текущий токен уже является типом поля, чтобы не плодить каскад ошибок.
+                        if (code == CODE_IDENTIFIER) {
+                            String text = cur.getText();
+                            if (!TYPE_KEYWORDS.contains(text) && (text.isEmpty() || !Character.isUpperCase(text.charAt(0)))) {
+                                result.add(errorLexeme(cur, "ошибка: неизвестный тип '" + text + "'"));
+                            }
+                        }
+                        state = State.EXPECT_ARRAY_OR_SEMI;
                     } else if (code == CODE_BRACE_CLOSE) {
                         result.add(errorLexeme(cur, "ошибка: ожидается ':' после имени поля"));
                         state = State.EXPECT_FINAL_SEMI;
@@ -472,8 +525,17 @@ public final class TypeScriptInterfaceScanner {
                             state = State.EXPECT_ARRAY_OR_SEMI;
                         } else {
                             result.add(errorLexeme(cur, "ошибка: неизвестный тип '" + text + "'"));
+                            Lexeme nextSig = peekNextNonWs(lexemes, i);
+                            if (nextSig != null && nextSig.getLine() == cur.getLine() && nextSig.getCode() == CODE_ERROR) {
+                                suppressMalformedTypeTailLine = cur.getLine();
+                            }
                             state = State.EXPECT_ARRAY_OR_SEMI;
                         }
+                    } else if (code == CODE_ERROR) {
+                        removeJustAddedRawLexicalError(result, cur);
+                        result.add(errorLexeme(cur, "ошибка: неизвестный тип"));
+                        suppressMalformedTypeTailLine = cur.getLine();
+                        state = State.EXPECT_ARRAY_OR_SEMI;
                     } else if (code == CODE_BRACE_CLOSE || code == CODE_SEMICOLON) {
                         result.add(errorLexeme(cur, "ошибка: ожидается тип после ':'"));
                         if (code == CODE_BRACE_CLOSE) state = State.EXPECT_FINAL_SEMI;
@@ -488,6 +550,10 @@ public final class TypeScriptInterfaceScanner {
                         state = State.EXPECT_FIELD_OR_CLOSE;
                     } else if (code == CODE_BRACKET_OPEN) {
                         state = State.EXPECT_BRACKET_CLOSE;
+                    } else if (code == CODE_ERROR) {
+                        removeJustAddedRawLexicalError(result, cur);
+                        result.add(errorLexeme(cur, "ошибка: неизвестный тип"));
+                        suppressMalformedTypeTailLine = cur.getLine();
                     } else if (code == CODE_BRACE_CLOSE) {
                         result.add(errorLexeme(cur, "ошибка: ожидается ';' после типа"));
                         state = State.EXPECT_FINAL_SEMI;
@@ -541,6 +607,20 @@ public final class TypeScriptInterfaceScanner {
             }
         }
 
+        if (lastLexeme != null) {
+            int errLine = lastLexeme.getLine();
+            int errCol = lastLexeme.getEndColumn() + 1;
+            if (state == State.EXPECT_NAME) {
+                result.add(new Lexeme(CODE_ERROR, "ошибка: ожидается имя идентификатора", "", errLine, errCol, errCol, true));
+            } else if (state == State.EXPECT_TYPE_ALIAS_NAME) {
+                result.add(new Lexeme(CODE_ERROR, "ошибка: ожидается имя псевдонима типа", "", errLine, errCol, errCol, true));
+            } else if (state == State.EXPECT_EQUALS) {
+                result.add(new Lexeme(CODE_ERROR, "ошибка: ожидается '=' после имени псевдонима типа", "", errLine, errCol, errCol, true));
+            } else if (state == State.EXPECT_OPEN_BRACE) {
+                result.add(new Lexeme(CODE_ERROR, "ошибка: ожидается '{'", "", errLine, errCol, errCol, true));
+            }
+        }
+
         if (braceDepth > 0 && lastLexeme != null) {
             int errLine = lastLexeme.getLine();
             int errCol = lastLexeme.getEndColumn() + 1;
@@ -556,6 +636,21 @@ public final class TypeScriptInterfaceScanner {
 
     private static Lexeme errorLexeme(Lexeme at, String message) {
         return new Lexeme(CODE_ERROR, message, at.getText(), at.getLine(), at.getStartColumn(), at.getEndColumn(), true);
+    }
+
+    private static boolean isLineBreakWhitespace(Lexeme lexeme) {
+        return lexeme.getCode() == CODE_WHITESPACE && "\n".equals(lexeme.getText());
+    }
+
+    private static void removeJustAddedRawLexicalError(List<Lexeme> result, Lexeme cur) {
+        if (result.isEmpty()) {
+            return;
+        }
+        Lexeme last = result.get(result.size() - 1);
+        if (last == cur && cur.getCode() == CODE_ERROR && cur.getTypeName() != null
+                && cur.getTypeName().startsWith("ошибка (недопустимый символ)")) {
+            result.remove(result.size() - 1);
+        }
     }
 
     private static boolean isLetterOrUnderscore(char c) {
