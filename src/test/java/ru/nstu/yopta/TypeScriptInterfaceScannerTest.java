@@ -302,6 +302,40 @@ class TypeScriptInterfaceScannerTest {
         assertContains(structureErrors, "ожидается ';' после объявления");
     }
 
+    @Test
+    void interaceWithMalformedNumTypeAndMissingSemiAfterStringReportsFiveStructureErrors() {
+        String source = """
+                interace  Pepe  {
+                  a num%%ber;
+                  b: string
+                }
+                """;
+        List<String> structureErrors = structureErrors(source);
+        assertEquals(5, structureErrors.size(), "Ожидается ровно 5 структурных ошибок без дубля «неизвестный тип»");
+        assertContains(structureErrors, "отсутствует ключевое слово");
+        assertContains(structureErrors, "ожидается ':'");
+        assertContains(structureErrors, "неизвестный тип");
+        assertContains(structureErrors, "ожидается ';' после типа");
+        assertContains(structureErrors, "ожидается ';' после '}'");
+    }
+
+    @Test
+    void interaceWithMalformedNumAndStrDotTailReportsSevenStructureErrors() {
+        String source = """
+                 interace  Pepe  {
+                  a num%%ber;
+                  b str...ing
+                }
+                """;
+        List<String> structureErrors = structureErrors(source);
+        assertEquals(7, structureErrors.size(), "Ожидается ровно 7 структурных ошибок без дублей неизвестного типа");
+        assertContains(structureErrors, "отсутствует ключевое слово");
+        assertContains(structureErrors, "ожидается ':'");
+        assertContains(structureErrors, "неизвестный тип");
+        assertContains(structureErrors, "ожидается ';' после типа");
+        assertContains(structureErrors, "ожидается ';' после '}'");
+    }
+
     private static List<String> structureErrors(String source) {
         return TypeScriptInterfaceScanner.scan(source).stream()
                 .filter(Lexeme::isError)

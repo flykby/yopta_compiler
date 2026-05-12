@@ -28,6 +28,31 @@ application {
     applicationDefaultJvmArgs = ['-Xdock:name=Yopta Code']
 }
 
+/** Property<String> или уже String — в зависимости от версии/плагинов Gradle. */
+ext.providerString = { Object v ->
+    (v instanceof org.gradle.api.provider.Provider) ? v.get().toString() : v.toString()
+}
+
+/** Рекурсивно: каталог, в котором лежат *.jmod (после распаковки zip Gluon). */
+ext.findJmodsDirContaining = { File root ->
+    if (!root.exists() || !root.isDirectory()) {
+        return null
+    }
+    def list = root.listFiles()
+    if (list && list.any { it.isFile() && it.name.endsWith('.jmod') }) {
+        return root
+    }
+    for (def c in list ?: []) {
+        if (c.isDirectory()) {
+            def nested = project.ext.findJmodsDirContaining(c)
+            if (nested != null) {
+                return nested
+            }
+        }
+    }
+    return null
+}
+
 configurations {
     jflex
 }
@@ -71,4 +96,267 @@ tasks.named('compileJava') {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+// --- Windows: jpackage (app-image с лаунчером .exe; запускать на Windows, см. README) ---
+// Тип Exec вместо project.exec — в части окружений у Project нет метода exec().
+// В runtime jpackage по умолчанию нет модулей JavaFX — подмешиваем официальные jmods (Gluon)
+// и убираем javafx-*.jar из --input, иначе «JavaFX runtime components are missing».
+tasks.register('winJpackage', Exec) {
+    group = 'distribution'
+    description = 'Собрать для Windows каталог jpackage (лаунчер YoptaCode.exe). Только на Windows + JDK 25 с jpackage.'
+    dependsOn installDist
+
+    doFirst {
+        if (!System.getProperty('os.name').toLowerCase(java.util.Locale.ROOT).contains('windows')) {
+            throw new GradleException(
+                    'winJpackage: Windows only (JavaFX native libs). On macOS/Linux use GitHub Action "Windows jpackage" or a Windows VM.'
+            )
+        }
+        File jpackageExe = new File(System.getProperty('java.home'), 'bin/jpackage.exe')
+        if (!jpackageExe.isFile()) {
+            throw new GradleException("winJpackage: jpackage.exe not found at ${jpackageExe.absolutePath}. Install full JDK 25 (not a JRE without jpackage).")
+        }
+
+        String projectAbs = project.projectDir.absolutePath
+        boolean sharedMacDisk = projectAbs ==~ /(?i)^[A-Za-z]:\\Mac\\Home\\.*/
+                || projectAbs.startsWith('\\\\psf\\')
+                || projectAbs.startsWith('//psf/')
+        String localAppData = System.getenv('LOCALAPPDATA')
+        File localYoptaBase = localAppData
+                ? new File(localAppData, 'YoptaCompiler')
+                : new File(System.getProperty('java.io.tmpdir'), 'YoptaCompiler')
+        localYoptaBase.mkdirs()
+
+        // На общей папке macOS↔Windows jlink почти не завершается — кэш jmods, input и --dest уводим на локальный диск ВМ.
+        boolean forceLocalStage = 'true'.equalsIgnoreCase(project.findProperty('winJpackageLocalStage')?.toString())
+        boolean useLocalStage = sharedMacDisk || forceLocalStage
+        boolean legacyAllowShared = 'true'.equalsIgnoreCase(project.findProperty('winJpackageAllowSharedDisk')?.toString())
+        if (sharedMacDisk && legacyAllowShared && !forceLocalStage) {
+            logger.lifecycle('[winJpackage] Подсказка: -PwinJpackageAllowSharedDisk больше не нужен — при общей папке Parallels стадия на LOCALAPPDATA включается сама.')
+        }
+
+        String osArch = System.getProperty('os.arch', '').toLowerCase(java.util.Locale.ROOT)
+        if (osArch.contains('aarch64') || osArch == 'arm64') {
+            throw new GradleException(
+                    'winJpackage: only Windows x64 OpenJFX jmods are wired. Use x64 Windows or extend build.gradle for Windows on ARM.'
+            )
+        }
+
+        // Совместимо с зависимостями org.openjfx:*:22 (мажор 22)
+        String openjfxJmodsRelease = '22.0.2'
+        String zipName = "openjfx-${openjfxJmodsRelease}_windows-x64_bin-jmods.zip"
+        String jmodsUrl = "https://download2.gluonhq.com/openjfx/${openjfxJmodsRelease}/${zipName}"
+
+        String safeProjectSlug = rootProject.name.replaceAll(/[^a-zA-Z0-9_.-]/, '_')
+        File outRoot = layout.buildDirectory.dir('jpackage').get().asFile
+        File jpackageDestRoot = outRoot
+        project.ext.yoptaWinJpackageStaged = false
+        project.ext.yoptaWinJpackageStageDestRoot = null
+        if (useLocalStage) {
+            jpackageDestRoot = new File(localYoptaBase, "jpackage-out/${safeProjectSlug}")
+            project.delete(jpackageDestRoot)
+            jpackageDestRoot.mkdirs()
+            project.delete(outRoot)
+            String reason = sharedMacDisk ? 'общая папка macOS (Parallels)' : 'winJpackageLocalStage=true'
+            logger.lifecycle(
+                    "[winJpackage] ${reason}: jpackage → ${jpackageDestRoot.absolutePath}, затем копирование в build/jpackage/"
+            )
+            project.ext.yoptaWinJpackageStaged = true
+            project.ext.yoptaWinJpackageStageDestRoot = jpackageDestRoot
+        } else {
+            project.delete(outRoot)
+            outRoot.mkdirs()
+            project.ext.yoptaWinJpackageStaged = false
+            project.ext.yoptaWinJpackageStageDestRoot = null
+        }
+
+        String appDistName = providerString(application.applicationName)
+        File libDir = layout.buildDirectory.dir("install/${appDistName}/lib").get().asFile
+        String mainJarName = providerString(tasks.jar.archiveFileName)
+        String appVersion = project.version.toString().replaceFirst(/-SNAPSHOT$/, '')
+        String mainClassName = providerString(application.mainClass)
+
+        File jpackageInputLib = useLocalStage
+                ? new File(localYoptaBase, "jpackage-input-lib/${safeProjectSlug}")
+                : layout.buildDirectory.dir('jpackage-input-lib').get().asFile
+        project.delete(jpackageInputLib)
+        jpackageInputLib.mkdirs()
+        libDir.eachFile { f ->
+            if (f.isFile()) {
+                boolean isJavafxJar = f.name.startsWith('javafx-') && f.name.endsWith('.jar')
+                if (!isJavafxJar) {
+                    java.nio.file.Files.copy(
+                            f.toPath(),
+                            new File(jpackageInputLib, f.name).toPath(),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                    )
+                }
+            }
+        }
+
+        // Кэш вне build/: иначе ./gradlew clean снова качает ~40 МБ jmods с Gluon. На Parallels shared — кэш на LOCALAPPDATA.
+        File jmodsCacheDir = useLocalStage
+                ? new File(localYoptaBase, 'openjfx-jmods-cache')
+                : layout.projectDirectory.dir('.gradle/yopta-openjfx-jmods').asFile
+        jmodsCacheDir.mkdirs()
+        File jmodsZip = new File(jmodsCacheDir, zipName)
+        if (!jmodsZip.isFile() || jmodsZip.length() < 10_000_000L) {
+            logger.lifecycle("[winJpackage] Скачивание OpenJFX jmods ${zipName} (~40 МБ) в ${jmodsCacheDir.absolutePath} (clean не удаляет кэш)")
+            java.net.URI.create(jmodsUrl).toURL().openStream().withCloseable { ins ->
+                jmodsZip.withOutputStream { outs ->
+                    outs << ins
+                }
+            }
+        } else {
+            logger.lifecycle("[winJpackage] jmods уже в кэше: ${jmodsZip.absolutePath}")
+        }
+
+        // Распаковка jmods тоже в .gradle + stamp — не удалять при clean и не распаковывать ~40 МБ каждый раз.
+        File jmodsUnpackRoot = new File(jmodsCacheDir, "unpack-${openjfxJmodsRelease}")
+        File stamp = new File(jmodsUnpackRoot, '.yopta-jmods-stamp')
+        String stampExpected = "${jmodsZip.lastModified()}_${jmodsZip.length()}"
+        File jmodsPathDir = null
+        if (stamp.isFile() && stamp.text.trim() == stampExpected) {
+            jmodsPathDir = project.ext.findJmodsDirContaining(jmodsUnpackRoot)
+            if (jmodsPathDir != null) {
+                logger.lifecycle('[winJpackage] jmods из кэша (zip + распаковка), пропускаю unzip')
+            }
+        }
+        if (jmodsPathDir == null) {
+            project.delete(jmodsUnpackRoot)
+            jmodsUnpackRoot.mkdirs()
+            project.copy {
+                from zipTree(jmodsZip)
+                into jmodsUnpackRoot
+            }
+            jmodsPathDir = project.ext.findJmodsDirContaining(jmodsUnpackRoot)
+            if (jmodsPathDir == null) {
+                throw new GradleException('winJpackage: no .jmod files found after unpacking OpenJFX jmods.')
+            }
+            stamp.text = stampExpected
+        }
+
+        // Имя без пробелов: на путях \\psf\... (Parallels) лаунчер с пробелом чаще ломается.
+        String jpackageAppName = 'YoptaCode'
+
+        // jpackage почти не пишет в консоль (кажется «зависанием»); на ВМ 5–15 мин бывает. Подробности: -PwinJpackageVerbose=true
+        logger.lifecycle('[winJpackage] Запуск jpackage (внутри jlink: на ВМ часто 5–15 мин; при Parallels в лог пойдут отметки раз в 2 мин; в остальное время тишина — норма)…')
+
+        def jpArgs = [
+                '--type', 'app-image',
+                '--name', jpackageAppName,
+                '--dest', jpackageDestRoot.absolutePath,
+                '--input', jpackageInputLib.absolutePath,
+                '--module-path', jmodsPathDir.absolutePath,
+                '--add-modules', 'javafx.base,javafx.graphics,javafx.controls,javafx.fxml',
+                '--main-jar', mainJarName,
+                '--main-class', mainClassName,
+                '--app-version', appVersion,
+                '--vendor', 'NSTU',
+                '--description', 'Yopta Code — лексический анализатор (GUI)',
+        ]
+        // Временные файлы jlink — на локальный диск Windows, не на \\psf\
+        File jpackageTempDir = localAppData
+                ? new File(localAppData, 'YoptaCompiler/jpackage-temp')
+                : new File(System.getProperty('java.io.tmpdir'), 'yopta-jpackage-temp')
+        jpackageTempDir.mkdirs()
+        jpArgs += ['--temp', jpackageTempDir.absolutePath]
+
+        // Меньше CPU на сжатии образа (чуть быстрее jlink, больше размер на диске): -PwinJpackageFastLink=true
+        if ('true'.equalsIgnoreCase(project.findProperty('winJpackageFastLink')?.toString())) {
+            jpArgs += ['--jlink-options', '--compress=0']
+            logger.lifecycle('[winJpackage] jlink с --compress=0 (winJpackageFastLink)')
+        }
+
+        // Диагностика: .\gradlew.bat winJpackage -PwinJpackageVerbose=true
+        if ('true'.equalsIgnoreCase(project.findProperty('winJpackageVerbose')?.toString())) {
+            jpArgs += ['--verbose']
+        }
+        // Диагностика: .\gradlew.bat winJpackage -PwinJpackageConsole=true
+        if ('true'.equalsIgnoreCase(project.findProperty('winJpackageConsole')?.toString())) {
+            jpArgs += ['--win-console']
+        }
+        // Виртуалка без нормального GPU: .\gradlew.bat winJpackage -PwinJpackagePrismSw=true
+        if ('true'.equalsIgnoreCase(project.findProperty('winJpackagePrismSw')?.toString())) {
+            jpArgs += ['--java-options', '-Dprism.order=sw']
+        }
+
+        // Пока jpackage молчит — раз в 2 мин лог (Parallels по умолчанию; иначе -PwinJpackageHeartbeat=true)
+        boolean wantHeartbeat = useLocalStage
+                || 'true'.equalsIgnoreCase(project.findProperty('winJpackageHeartbeat')?.toString())
+        if (wantHeartbeat) {
+            long t0 = System.currentTimeMillis()
+            def pool = java.util.concurrent.Executors.newSingleThreadScheduledExecutor({ Runnable r ->
+                Thread t = new Thread(r, 'winJpackage-wait-hb')
+                t.setDaemon(true)
+                return t
+            } as java.util.concurrent.ThreadFactory)
+            def fut = pool.scheduleAtFixedRate({
+                long s = (System.currentTimeMillis() - t0) / 1000L
+                logger.lifecycle(
+                        "[winJpackage] jpackage всё ещё работает (~${s} с). Если >20 мин без нагрузки CPU у java.exe — прервите (Ctrl+C) и попробуйте " +
+                                '-PwinJpackageVerbose=true или исключение папки %LOCALAPPDATA%\\YoptaCompiler для антивируса.'
+                )
+            }, 120, 120, java.util.concurrent.TimeUnit.SECONDS)
+            Runnable hbStop = {
+                try {
+                    fut.cancel(false)
+                    pool.shutdown()
+                } catch (Throwable ignored) {
+                }
+            }
+            project.ext.yoptaWinJpackageHbStop = hbStop
+            gradle.buildFinished {
+                try {
+                    project.ext.yoptaWinJpackageHbStop?.run()
+                } catch (Throwable ignored) {
+                }
+                project.ext.yoptaWinJpackageHbStop = null
+            }
+        } else {
+            project.ext.yoptaWinJpackageHbStop = null
+        }
+
+        project.ext.yoptaWinJpackageExecStartMs = System.currentTimeMillis()
+        // Чтобы --verbose шёл в консоль сразу, а не буферизовался
+        standardOutput = System.out
+        errorOutput = System.err
+        executable = jpackageExe.absolutePath
+        args = jpArgs
+    }
+
+    doLast {
+        try {
+            project.ext.yoptaWinJpackageHbStop?.run()
+        } catch (Throwable ignored) {
+        }
+        project.ext.yoptaWinJpackageHbStop = null
+
+        if (project.ext.has('yoptaWinJpackageExecStartMs')) {
+            long startMs = ((Number) project.ext.yoptaWinJpackageExecStartMs).longValue()
+            long sec = (System.currentTimeMillis() - startMs) / 1000L
+            logger.lifecycle("[winJpackage] Фаза jpackage заняла ~${sec} с")
+            project.ext.yoptaWinJpackageExecStartMs = null
+        }
+        File buildOutRoot = layout.buildDirectory.dir('jpackage').get().asFile
+        if (project.ext.has('yoptaWinJpackageStaged') && project.ext.yoptaWinJpackageStaged
+                && project.ext.yoptaWinJpackageStageDestRoot != null) {
+            File stageRoot = project.ext.yoptaWinJpackageStageDestRoot as File
+            project.delete(buildOutRoot)
+            buildOutRoot.mkdirs()
+            project.copy {
+                from(new File(stageRoot, 'YoptaCode'))
+                into(new File(buildOutRoot, 'YoptaCode'))
+            }
+            project.ext.yoptaWinJpackageStaged = false
+            logger.lifecycle("[winJpackage] Скопировано в ${new File(buildOutRoot, 'YoptaCode').absolutePath}")
+        }
+        File appDir = new File(buildOutRoot, 'YoptaCode')
+        // Если exe падает сразу — двойной щелчок по этому cmd оставит окно и код выхода (pause).
+        File helper = new File(appDir, 'run-with-visible-errors.cmd')
+        String nl = System.lineSeparator()
+        helper.text = """@echo off${nl}cd /d \"%~dp0\"${nl}echo Starting YoptaCode.exe ...${nl}\"YoptaCode.exe\" %*${nl}echo.${nl}echo Exit code: %ERRORLEVEL%${nl}pause${nl}"""
+        logger.lifecycle("Готово: ${appDir.absolutePath} — запускайте YoptaCode.exe (или для диагностики: ${helper.name})")
+    }
 }

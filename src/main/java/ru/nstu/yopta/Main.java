@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 public class Main extends Application {
@@ -282,6 +283,17 @@ public class Main extends Application {
         editMenu.getItems().addAll(undoItem, redoItem, new SeparatorMenuItem(),
                 cutItem, copyItem, pasteItem, deleteItem, new SeparatorMenuItem(), selectAllItem);
 
+        Menu textMenu = new Menu(Messages.getString("menu.text"));
+        textMenu.getItems().addAll(
+                textPracticeItem("menu.text.problem", PascalDecimalPracticeContent::problemStatement),
+                textPracticeItem("menu.text.grammar", PascalDecimalPracticeContent::grammar),
+                textPracticeItem("menu.text.grammarClass", PascalDecimalPracticeContent::grammarClassification),
+                textPracticeItem("menu.text.method", PascalDecimalPracticeContent::analysisMethod),
+                textPracticeItem("menu.text.diagnostics", PascalDecimalPracticeContent::diagnostics),
+                textPracticeItem("menu.text.test", PascalDecimalPracticeContent::testExample),
+                textPracticeItem("menu.text.biblio", PascalDecimalPracticeContent::bibliography),
+                textPracticeItem("menu.text.source", PascalDecimalPracticeContent::sourceCode));
+
         Menu runMenu = new Menu(Messages.getString("menu.run"));
         MenuItem runDebugItem = new MenuItem(Messages.getString("menu.runDebug"));
         runDebugItem.setAccelerator(KeyCombination.keyCombination("Shortcut+F5"));
@@ -323,8 +335,18 @@ public class Main extends Application {
 
         helpMenu.getItems().addAll(helpItem, aboutItem);
 
-        menuBar.getMenus().addAll(fileMenu, editMenu, runMenu, viewMenu, helpMenu);
+        menuBar.getMenus().addAll(fileMenu, editMenu, textMenu, runMenu, viewMenu, helpMenu);
         return menuBar;
+    }
+
+    private MenuItem textPracticeItem(String titleKey, java.util.function.Function<Locale, String> body) {
+        MenuItem item = new MenuItem(Messages.getString(titleKey));
+        item.setOnAction(e -> {
+            Locale loc = AppSettings.getInstance().getLocale();
+            String title = Messages.getString(titleKey) + Messages.getString("textPractice.titleSuffix");
+            PracticeInfoWindow.show(stage, title, body.apply(loc));
+        });
+        return item;
     }
 
     private EditorTab getCurrentEditorTab() {

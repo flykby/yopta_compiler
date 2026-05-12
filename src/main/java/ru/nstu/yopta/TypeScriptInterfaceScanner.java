@@ -503,7 +503,14 @@ public final class TypeScriptInterfaceScanner {
                         // а текущий токен уже является типом поля, чтобы не плодить каскад ошибок.
                         if (code == CODE_IDENTIFIER) {
                             String text = cur.getText();
-                            if (!TYPE_KEYWORDS.contains(text) && (text.isEmpty() || !Character.isUpperCase(text.charAt(0)))) {
+                            Lexeme nextSig = peekNextNonWs(lexemes, i);
+                            boolean malformedTypeTailOnSameLine = nextSig != null && nextSig.getLine() == cur.getLine()
+                                    && nextSig.getCode() == CODE_ERROR;
+                            // Если дальше на строке «%», «.» и т.п., одну ошибку «неизвестный тип»
+                            // даёт EXPECT_ARRAY_OR_SEMI — не дублируем с «неизвестный тип 'num'».
+                            if (!malformedTypeTailOnSameLine
+                                    && !TYPE_KEYWORDS.contains(text)
+                                    && (text.isEmpty() || !Character.isUpperCase(text.charAt(0)))) {
                                 result.add(errorLexeme(cur, "ошибка: неизвестный тип '" + text + "'"));
                             }
                         }

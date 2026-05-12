@@ -232,10 +232,16 @@ type Point = { x: number; y: number; };
 ./gradlew run
 ```
 
-На Windows:
+На Windows в **cmd.exe**:
 
 ```bat
 gradlew.bat run
+```
+
+В **PowerShell** из каталога проекта нужна точка с обратным слэшем (иначе скрипт «не найден»):
+
+```powershell
+.\gradlew.bat run
 ```
 
 ### Сборка
@@ -243,6 +249,44 @@ gradlew.bat run
 ```bash
 ./gradlew build
 ```
+
+### Сборка под Windows (каталог с `YoptaCode.exe`)
+
+Приложение на JavaFX подтягивает **нативные библиотеки под текущую ОС**, поэтому **exe для Windows собирают на Windows** (или в CI на `windows-latest`), а не на macOS/Linux. **Локально с Mac собрать Windows app-image нельзя** — это не ограничение проекта, а связка `jpackage` + нативный JavaFX.
+
+**С Mac:** запустите workflow **«Windows jpackage»** на GitHub (см. ниже) и скачайте артефакт — по сути сборка выполняется на Windows в облаке.
+
+1. Установите **JDK 25** (полный JDK, в котором есть утилита `jpackage`).
+2. В каталоге проекта. Архив **jmods** OpenJFX (~40 МБ) при первой сборке кладётся в **`.gradle/yopta-openjfx-jmods/`** (на обычном диске Windows) или в **`%LOCALAPPDATA%\YoptaCompiler\openjfx-jmods-cache\`**, если проект лежит на **общей папке Parallels** — кэш не удаляется `clean`; повторный `winJpackage` не распаковывает zip заново. **Большую часть времени (часто 2–5 мин на ВМ)** занимает **`jpackage` / jlink** — это нормально.
+
+```powershell
+.\gradlew.bat installDist
+.\gradlew.bat winJpackage
+```
+
+Для полной пересборки образа без повторной загрузки jmods достаточно **`.\gradlew.bat winJpackage`** (без `clean`), если не менялись зависимости.
+
+(В **cmd.exe** можно без `.\`: `gradlew.bat installDist`.)
+
+Если проект на **общей папке macOS в Parallels** (`C:\Mac\Home\...` или `\\psf\...`): задача **`winJpackage` сама переносит** тяжёлую работу jpackage/jlink на **`%LOCALAPPDATA%\YoptaCompiler\`** (локальный диск ВМ), затем копирует готовый **`YoptaCode`** в `build\jpackage\`. Дополнительно: `-PwinJpackageVerbose=true`, принудительная стадия на LOCALAPPDATA даже без Parallels: `-PwinJpackageLocalStage=true`. Для предупреждения Gradle *Couldn't add watch* на `\\psf\` в репозитории задано `org.gradle.vfs.watch=false` в `gradle.properties`.
+
+3. Результат: каталог `build\jpackage\YoptaCode\` с файлом **`YoptaCode.exe`** и зависимостями (это формат **app-image** от `jpackage`, не один «тонкий» exe).
+
+#### Если exe не запускается или сразу закрывается
+
+1. **Не запускайте с общей папки macOS** (`\\psf\Home\...` в Parallels): скопируйте всю папку **`YoptaCode`** на локальный диск Windows, например `C:\Apps\YoptaCode\`, и запускайте оттуда.
+2. **Мелькает чёрное окно консоли:** если вы собирали с `-PwinJpackageConsole=true`, у лаунчера **всегда** висит консоль — при падении JVM она **закрывается вместе с процессом**, текст не успевают прочитать. Для обычного GUI пересоберите **без** этого флага. Чтобы увидеть **код выхода**, в папке образа после сборки есть **`run-with-visible-errors.cmd`** — запустите его двойным щелчком; после завершения `YoptaCode.exe` окно останется на `pause` и покажет `Exit code: ...`.
+3. **Текст ошибки JVM в консоли:** снова откройте **cmd.exe**, выполните `cd /d C:\Apps\YoptaCode`, затем `YoptaCode.exe` и сразу после падения в том же окне иногда остаётся вывод (если приложение писало в stderr). Надёжнее — пересборка с `-PwinJpackageConsole=true` и запуск **из уже открытого** `cmd` из той же папки: `YoptaCode.exe` (часть вывода всё равно может уйти в отдельное окно — тогда смотрите **Просмотр событий Windows** → журналы приложений).
+4. **Виртуалка без нормального 3D (QuantumRenderer / «no suitable pipeline»):** пересборка с программным рендером Prism:
+   ```powershell
+   .\gradlew.bat winJpackage -PwinJpackagePrismSw=true
+   ```
+   (при необходимости вместе с диагностикой: `-PwinJpackagePrismSw=true -PwinJpackageConsole=true`).
+5. Проверьте **Guest Tools / драйверы дисплея** Parallels. **JDK 25** должен совпадать по разрядности с ОС. Задача **`winJpackage`** сейчас подтягивает jmods OpenJFX только для **Windows x64** (на Windows on ARM сборка остановится с явным сообщением Gradle).
+
+**Без машины с Windows:** в репозитории есть workflow GitHub Actions **«Windows jpackage»** (запуск вручную: *Actions* → *Windows jpackage* → *Run workflow*). В артефакте будет архив с `build/jpackage/`.
+
+Чтобы получить **один установочный .exe** (инсталлятор), нужен WiX Toolset и режим `jpackage --type exe`; в учебном проекте по умолчанию используется app-image без WiX.
 
 ## Кратко об интерфейсе (лабораторная №1 + №2)
 

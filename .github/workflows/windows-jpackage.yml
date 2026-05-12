@@ -1,0 +1,25 @@
+# Сборка Windows app-image (jpackage) без локальной Windows: Actions → Artifacts.
+name: Windows jpackage
+
+on:
+  workflow_dispatch:
+
+jobs:
+  jpackage:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Gradle winJpackage
+        shell: pwsh
+        run: ./gradlew.bat winJpackage --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yopta-code-windows-app-image
+          path: build/jpackage/
